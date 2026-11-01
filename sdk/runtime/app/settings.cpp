@@ -183,6 +183,7 @@ float FrameAspect() {
 }
 
 float RenderScale(uint32_t guest_height) {
+    if (g_render_classic) return 1.0f;
     float h = Output().height * (Get().render_percent / 100.0f);
     return guest_height ? std::max(h / guest_height, 0.1f) : 1.0f;
 }

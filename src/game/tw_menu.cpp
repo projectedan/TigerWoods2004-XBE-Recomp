@@ -25,7 +25,7 @@
 #include "imgui.h"
 
 void TW_ApplyScene();
-extern bool g_tw_haze, g_tw_bloom, g_tw_focus, g_tw_ao, g_tw_hud_corners, g_tw_full_detail;
+extern bool g_tw_haze, g_tw_bloom, g_tw_focus, g_tw_ao, g_tw_full_detail;
 extern float g_tw_haze_amount, g_tw_bloom_amount;
 
 namespace {
@@ -45,7 +45,7 @@ std::atomic<bool> g_open{false}, g_swallow{false}, g_fresh{false};  // swallow: 
 std::atomic<uint32_t> g_pad[4], g_keys{0};
 ImFont* g_font = nullptr;
 
-enum class Kind { Mode, Resolution, VSync, Tick, Amount };
+enum class Kind { Mode, Scale, Smoothing, VSync, Tick, Amount };
 struct Row {
     Kind kind;
     const char* label;
@@ -53,7 +53,7 @@ struct Row {
     float* amount = nullptr;
 };
 const std::vector<Row> kPages[2] = {
-    {{Kind::Mode, "WINDOW"}, {Kind::Resolution, "RESOLUTION"}, {Kind::VSync, "V-SYNC"}, {Kind::Tick, "HUD AT CORNERS", &g_tw_hud_corners},
+    {{Kind::Mode, "WINDOW"}, {Kind::Scale, "RESOLUTION SCALING"}, {Kind::Smoothing, "ANTI-ALIASING"}, {Kind::VSync, "V-SYNC"},
      {Kind::Tick, "FULL DETAIL TREES", &g_tw_full_detail}},
     {{Kind::Tick, "DISTANCE HAZE", &g_tw_haze},
      {Kind::Amount, "INTENSITY", nullptr, &g_tw_haze_amount},
@@ -64,8 +64,10 @@ const std::vector<Row> kPages[2] = {
 };
 const char* const kPageNames[2] = {"DISPLAY", "EFFECTS"};
 const char* const kModeNames[3] = {"FULLSCREEN", "BORDERLESS", "WINDOWED"};
-
-using Size = std::pair<uint32_t, uint32_t>;
+// the frame's size: the console's, the screen's, multiples of the screen's. Taken with A, as each step remakes the targets
+const char* const kScaleNames[4] = {"CLASSIC", "DESKTOP", "2X", "3X"};
+constexpr uint32_t kScalePercent[4] = {100, 100, 200, 300};
+const char* const kSmoothingNames[3] = {"OFF", "SMAA", "MSAA 2X"};
 
 // the game's look
 constexpr ImU32 kOrange = IM_COL32(236, 124, 32, 255), kOrangeLit = IM_COL32(255, 170, 70, 255), kWhite = IM_COL32(255, 255, 255, 255),
@@ -77,44 +79,27 @@ constexpr float kSlant = 0.2f, kNarrow = 0.82f;
 struct State {
     int page = 0, row = 0;
     bool dirty = false;
-    std::vector<Size> sizes;
-    Size pending{};  // the size on show; taken with A, as each step would resize the window
-    bool pending_on = false;
+    int pending = 0;  // the scale on show, past the one in use while pending_on
+    bool pending_on = false, leaving = false;  // leaving: Exit Game waits for A a second time
     uint32_t last = 0, repeat = 0;
     std::chrono::steady_clock::time_point held;
 } g;
 
-std::vector<Size> ScreenSizes() {
-    std::vector<Size> list;
-    MONITORINFOEXW mi{};
-    mi.cbSize = sizeof(mi);
-    if (GetMonitorInfoW(MonitorFromWindow(static_cast<HWND>(app::Window()), MONITOR_DEFAULTTOPRIMARY), &mi)) {
-        DEVMODEW dm{};
-        dm.dmSize = sizeof(dm);
-        for (DWORD i = 0; EnumDisplaySettingsW(mi.szDevice, i, &dm); i++)
-            if (dm.dmPelsWidth >= 640 && dm.dmPelsHeight >= 480) list.emplace_back(dm.dmPelsWidth, dm.dmPelsHeight);
-    }
-    std::sort(list.begin(), list.end());
-    list.erase(std::unique(list.begin(), list.end()), list.end());
-    list.insert(list.begin(), {0u, 0u});  // the desktop's
-    return list;
+int ScaleNow() {
+    if (app::g_render_classic) return 0;
+    uint32_t p = app::Get().render_percent;
+    return p >= 300 ? 3 : p >= 200 ? 2 : 1;
 }
 
-std::string SizeText(Size s) {
-    char t[48];
-    app::Mode d = app::Desktop();
-    if (s.first) std::snprintf(t, sizeof t, "%u X %u", s.first, s.second);
-    else std::snprintf(t, sizeof t, "DESKTOP (%u X %u)", d.width, d.height);
-    return t;
+int SmoothingNow() {
+    const app::Settings& s = app::Get();
+    return s.msaa >= 2 ? 2 : s.smaa ? 1 : 0;
 }
-
-bool Sized() { return app::Get().display_mode != app::DisplayMode::Borderless; }
-bool Selectable(const Row& r) { return r.kind != Kind::Resolution || Sized(); }
 
 void Close() {
     if (!g_open.exchange(false)) return;
     g_swallow = true;
-    g.pending_on = false;
+    g.pending_on = g.leaving = false;
     if (g.dirty) {
         app::Save();
         g.dirty = false;
@@ -125,6 +110,10 @@ void Close() {
 void Open() {
     if (g_open.exchange(true)) return;
     g_fresh = true;
+    if (app::Get().msaa > 2) {  // a higher count from the settings file: the most this menu offers
+        app::Get().msaa = 2;
+        g.dirty = true;
+    }
     LOGI("menu: open");
 }
 
@@ -133,13 +122,10 @@ void Toggle() {
     else Open();
 }
 
+// the rows, then Exit Game
 void Move(int step) {
-    const auto& rows = kPages[g.page];
-    int n = int(rows.size());
-    for (int i = 0; i < n; i++) {
-        g.row = (g.row + step + n) % n;
-        if (Selectable(rows[size_t(g.row)])) return;
-    }
+    int n = int(kPages[g.page].size()) + 1;
+    g.row = (g.row + step + n) % n;
 }
 
 // a row's value one step on (-1, 1); confirm: A, not left or right
@@ -151,22 +137,25 @@ void Change(const Row& r, int step, bool confirm) {
             if (s.display_mode == app::DisplayMode::Borderless) s.width = s.height = 0;  // the desktop's size
             app::ApplyDisplay();
             break;
-        case Kind::Resolution: {
-            Size now = g.pending_on ? g.pending : Size{s.width, s.height};
+        case Kind::Scale: {
             if (confirm) {
                 if (!g.pending_on) return;
-                s.width = now.first;
-                s.height = now.second;
+                app::g_render_classic = g.pending == 0;
+                s.render_percent = kScalePercent[g.pending];
                 g.pending_on = false;
-                app::ApplyDisplay();
                 break;
             }
-            if (g.sizes.empty()) g.sizes = ScreenSizes();
-            auto it = std::find(g.sizes.begin(), g.sizes.end(), now);
-            int i = it == g.sizes.end() ? 0 : int(it - g.sizes.begin()), n = int(g.sizes.size());
-            g.pending = g.sizes[size_t((i + step + n) % n)];
-            g.pending_on = g.pending != Size{s.width, s.height};
+            int now = g.pending_on ? g.pending : ScaleNow();
+            g.pending = (now + step + 4) % 4;
+            g.pending_on = g.pending != ScaleNow();
             return;
+        }
+        case Kind::Smoothing: {
+            if (confirm) return;
+            int k = (SmoothingNow() + step + 3) % 3;
+            s.smaa = k == 1;
+            s.msaa = k == 2 ? 2 : 0;
+            break;
         }
         case Kind::VSync: s.vsync = !s.vsync; break;
         case Kind::Tick:
@@ -199,18 +188,30 @@ void Input() {
         pressed |= arrows;
     }
     if (pressed & (kB | kStart)) {
-        if (!(now & kBack)) Close();
+        if (g.leaving) g.leaving = false;
+        else if (!(now & kBack)) Close();
         return;
     }
     if (pressed & (kPrev | kNext)) {
         g.page = g.page ^ 1;
         g.row = 0;
-        g.pending_on = false;
+        g.pending_on = g.leaving = false;
     }
     const auto& rows = kPages[g.page];
     if (pressed & kUp) Move(-1);
     if (pressed & kDown) Move(1);
-    if (pressed & (kUp | kDown)) g.pending_on = false;
+    if (pressed & (kUp | kDown)) g.pending_on = g.leaving = false;
+    if (g.row == int(rows.size())) {
+        if (pressed & kA) {
+            if (g.leaving) {
+                Close();
+                PostMessageW(static_cast<HWND>(app::Window()), WM_CLOSE, 0, 0);
+                return;
+            }
+            g.leaving = true;
+        }
+        return;
+    }
     const Row& r = rows[size_t(g.row)];
     if (pressed & kLeft) Change(r, -1, false);
     if (pressed & kRight) Change(r, 1, false);
@@ -237,8 +238,22 @@ void Glyph(ImDrawList* dl, float u, float x, float y, ImU32 col, const char* let
     float r = 8 * u;
     dl->AddCircleFilled(ImVec2(x, y), r + 1.2f * u, IM_COL32(230, 230, 236, 255), 24);
     dl->AddCircleFilled(ImVec2(x, y), r, col, 24);
-    Text(dl, 10 * u, x, y - 6.5f * u, kWhite, letter, 0.5f);
-    Text(dl, 12 * u, x + r + 5 * u, y - 7.5f * u, kWhite, word);
+    // the letter by what it covers: its advance and the font's line would leave it high and, slanted, to one side
+    int first = dl->VtxBuffer.Size;
+    Text(dl, 10 * u, x, y, kWhite, letter, 0.5f);
+    ImVec2 lo(FLT_MAX, FLT_MAX), hi(-FLT_MAX, -FLT_MAX);
+    for (int i = first; i < dl->VtxBuffer.Size; i++) {
+        const ImVec2& p = dl->VtxBuffer[i].pos;
+        lo = ImVec2(std::min(lo.x, p.x), std::min(lo.y, p.y));
+        hi = ImVec2(std::max(hi.x, p.x), std::max(hi.y, p.y));
+    }
+    float shade = 0.3f * u;  // half its shadow's reach, which the extent takes in
+    for (int i = first; i < dl->VtxBuffer.Size; i++) {
+        ImDrawVert& v = dl->VtxBuffer[i];
+        v.pos.x += x - (lo.x + hi.x) / 2 + shade;
+        v.pos.y += y - (lo.y + hi.y) / 2 + shade;
+    }
+    Text(dl, 12 * u, x + r + 5 * u, y - 6 * u, kWhite, word);
 }
 
 void Arrow(ImDrawList* dl, float u, float x, float y, float dir) {
@@ -267,62 +282,74 @@ void Bar(ImDrawList* dl, float u, float x, float y, float w, float amount, bool 
 void Draw() {
     ImDrawList* dl = ImGui::GetForegroundDrawList();
     ImVec2 size = ImGui::GetIO().DisplaySize;
-    float u = size.y / 480.0f, W = size.x, cx = W / 2, side = std::min(W / 2, 300 * u);  // u: a console line
+    float u = size.y / 480.0f, cx = size.x / 2;  // u: a console line
     app::Settings& s = app::Get();
 
+    // a box in the middle of the screen, the height of the longest page so that it holds still between them
+    constexpr size_t kMostRows = 6;
+    float pw = 225 * u, band = 42 * u, tabs = 24 * u, high = 34 * u, gap = 6 * u, exit = 38 * u, foot = 26 * u;
+    float body = high * kMostRows + gap * 2 + exit, total = band + tabs + body + foot;
+    float left = cx - pw, right = cx + pw, head = (size.y - total) / 2, tab = head + band, top = tab + tabs, bottom = top + body;
+    for (int i = 3; i > 0; i--) {
+        float grow = float(i) * 4 * u;
+        dl->AddRectFilled(ImVec2(left - grow, head - grow), ImVec2(right + grow, bottom + foot + grow), IM_COL32(0, 0, 0, 44), 4 * u * float(i));
+    }
+
     // the header: a band with the golf ball's dimples, its title on the right, and the page row under it
-    float band = 52 * u, row = 26 * u;
-    dl->AddRectFilledMultiColor(ImVec2(0, 0), ImVec2(W, band), IM_COL32(112, 114, 130, 255), IM_COL32(58, 42, 104, 255),
+    dl->AddRectFilledMultiColor(ImVec2(left, head), ImVec2(right, tab), IM_COL32(112, 114, 130, 255), IM_COL32(58, 42, 104, 255),
                                 IM_COL32(34, 28, 66, 255), IM_COL32(58, 62, 84, 255));
-    dl->AddRectFilled(ImVec2(0, 0), ImVec2(W, 3 * u), IM_COL32(186, 186, 196, 255));
+    dl->AddRectFilled(ImVec2(left, head), ImVec2(right, head + 3 * u), IM_COL32(186, 186, 196, 255));
+    dl->PushClipRect(ImVec2(left, head + 3 * u), ImVec2(right, tab), true);
     for (int y = 0; y < 5; y++)
-        for (float x = (y & 1) * 5 * u; x < W; x += 10 * u)
-            dl->AddCircleFilled(ImVec2(x, (9 + y * 9) * u), 2.6f * u, IM_COL32(190, 200, 225, 34), 8);
-    Text(dl, 12 * u, cx - side, 15 * u, kGrey, "TIGER WOODS PGA TOUR 2004");
-    Text(dl, 34 * u, cx + side, 8 * u, kWhite, "OPTIONS", 1);
-    dl->AddRectFilledMultiColor(ImVec2(0, band), ImVec2(W, band + row), kBlack, kBlack, IM_COL32(24, 26, 48, 255), IM_COL32(24, 26, 48, 255));
-    float mid = band + row / 2;
+        for (float x = left + (y & 1) * 5 * u; x < right + 5 * u; x += 10 * u)
+            dl->AddCircleFilled(ImVec2(x, head + (6 + y * 9) * u), 2.6f * u, IM_COL32(190, 200, 225, 34), 8);
+    dl->PopClipRect();
+    Text(dl, 26 * u, right - 12 * u, head + 8 * u, kWhite, "OPTIONS", 1);
+    dl->AddRectFilledMultiColor(ImVec2(left, tab), ImVec2(right, top), kBlack, kBlack, IM_COL32(24, 26, 48, 255), IM_COL32(24, 26, 48, 255));
+    float mid = tab + tabs / 2, side = pw - 34 * u;
     Arrow(dl, u, cx - side, mid, -1);
     Arrow(dl, u, cx + side, mid, 1);
-    Text(dl, 19 * u, cx, mid - 11 * u, kWhite, kPageNames[g.page], 0.5f);
-    Text(dl, 14 * u, cx - side * 0.62f, mid - 8 * u, kDim, kPageNames[g.page ^ 1], 0.5f);
-    Text(dl, 14 * u, cx + side * 0.62f, mid - 8 * u, kDim, kPageNames[g.page ^ 1], 0.5f);
+    Text(dl, 17 * u, cx, mid - 10 * u, kWhite, kPageNames[g.page], 0.5f);
+    Text(dl, 13 * u, cx - side * 0.62f, mid - 7.5f * u, kDim, kPageNames[g.page ^ 1], 0.5f);
+    Text(dl, 13 * u, cx + side * 0.62f, mid - 7.5f * u, kDim, kPageNames[g.page ^ 1], 0.5f);
 
-    // the panel: the game's slate over its green and purple, the game itself showing through
+    // the panel: the game's slate over its green and purple
     const auto& rows = kPages[g.page];
-    float high = 36 * u, pw = 225 * u, top = 112 * u, bottom = top + high * rows.size() + 16 * u;
-    dl->AddRectFilledMultiColor(ImVec2(cx - pw, top), ImVec2(cx + pw, bottom), IM_COL32(54, 66, 68, 214), IM_COL32(50, 56, 70, 214),
-                                IM_COL32(52, 34, 84, 222), IM_COL32(34, 40, 76, 222));
-    dl->AddRectFilled(ImVec2(cx - pw, top - 4 * u), ImVec2(cx + pw, top), IM_COL32(12, 12, 20, 255));
-    dl->AddRectFilled(ImVec2(cx - pw, bottom), ImVec2(cx + pw, bottom + 4 * u), IM_COL32(12, 12, 20, 255));
+    dl->AddRectFilledMultiColor(ImVec2(left, top), ImVec2(right, bottom), IM_COL32(54, 66, 68, 244), IM_COL32(50, 56, 70, 244),
+                                IM_COL32(52, 34, 84, 248), IM_COL32(34, 40, 76, 248));
 
-    float label = cx - 10 * u, value = cx + 10 * u;
+    float label = cx - 10 * u, value = cx + 10 * u, first = top + gap;
     for (size_t i = 0; i < rows.size(); i++) {
         const Row& r = rows[i];
-        bool sel = int(i) == g.row, on = Selectable(r);
-        float y = top + 8 * u + high * i;
+        bool sel = int(i) == g.row;
+        float y = first + high * i;
         if (sel) {
-            dl->AddRectFilled(ImVec2(cx - pw, y + 2 * u), ImVec2(cx + pw, y + high - 2 * u), IM_COL32(236, 124, 32, 48));
-            dl->AddRectFilled(ImVec2(cx - pw, y + 2 * u), ImVec2(cx - pw + 4 * u, y + high - 2 * u), kOrange);
+            dl->AddRectFilled(ImVec2(left, y + 2 * u), ImVec2(right, y + high - 2 * u), IM_COL32(236, 124, 32, 48));
+            dl->AddRectFilled(ImVec2(left, y + 2 * u), ImVec2(left + 4 * u, y + high - 2 * u), kOrange);
         }
-        float ty = y + 8 * u;
-        Text(dl, r.kind == Kind::Amount ? 13 * u : 17 * u, label, r.kind == Kind::Amount ? ty + 3 * u : ty, sel ? kWhite : on ? kGrey : kDim, r.label, 1);
-        ImU32 val = sel ? kOrangeLit : on ? kWhite : kDim;
+        float ty = y + 6 * u;
+        Text(dl, r.kind == Kind::Amount ? 13 * u : 17 * u, label, r.kind == Kind::Amount ? ty + 3 * u : ty, sel ? kWhite : kGrey, r.label, 1);
+        ImU32 val = sel ? kOrangeLit : kWhite;
         char pct[16];
         switch (r.kind) {
             case Kind::Mode: Text(dl, 16 * u, value, ty, val, kModeNames[uint32_t(s.display_mode) % 3]); break;
-            case Kind::Resolution: {
-                bool wait = g.pending_on && sel;
-                Size now = wait ? g.pending : Size{s.width, s.height};
-                Text(dl, 15 * u, value, ty, val, SizeText(now).c_str());
-                if (wait) Text(dl, 10 * u, cx + pw - 8 * u, ty + 18 * u, kGrey, "A TO APPLY", 1);
+            case Kind::Scale: {
+                bool wait = g.pending_on;
+                Text(dl, 16 * u, value, ty, val, kScaleNames[wait ? g.pending : ScaleNow()]);
+                if (wait) Text(dl, 10 * u, right - 8 * u, ty + 4 * u, kGrey, "A TO APPLY", 1);
                 break;
             }
+            case Kind::Smoothing: Text(dl, 16 * u, value, ty, val, kSmoothingNames[SmoothingNow()]); break;
             case Kind::VSync: Tick(dl, u, value, ty + 1 * u, s.vsync, sel); break;
             case Kind::Tick: Tick(dl, u, value, ty + 1 * u, *r.flag, sel); break;
             case Kind::Amount: {
                 bool live = *rows[i - 1].flag;
-                Bar(dl, u, value, ty + 6 * u, 130 * u, *r.amount, live, sel);
+                // a line down from its parent's box, so that the slider reads as belonging to it
+                float drop = value + 7.5f * u, along = ty + 9.5f * u, reach = value + 20 * u;
+                ImU32 link = live ? kOrange : kDim;
+                dl->AddLine(ImVec2(drop, y - 10 * u), ImVec2(drop, along), link, 1.6f * u);
+                dl->AddLine(ImVec2(drop - 0.8f * u, along), ImVec2(reach, along), link, 1.6f * u);
+                Bar(dl, u, reach, ty + 6 * u, 112 * u, *r.amount, live, sel);
                 std::snprintf(pct, sizeof pct, "%d%%", int(*r.amount * 100 + 0.5f));
                 Text(dl, 13 * u, value + 180 * u, ty + 3 * u, val, pct, 1);
                 break;
@@ -330,12 +357,22 @@ void Draw() {
         }
     }
 
+    // Exit Game, in the same place on every page
+    bool leave = g.row == int(rows.size());
+    float ey = bottom - exit;
+    dl->AddRectFilled(ImVec2(left + 12 * u, ey), ImVec2(right - 12 * u, ey + 1.5f * u), IM_COL32(120, 122, 140, 120));
+    if (leave) {
+        dl->AddRectFilled(ImVec2(left, ey + 4 * u), ImVec2(right, bottom - 3 * u), IM_COL32(236, 124, 32, 48));
+        dl->AddRectFilled(ImVec2(left, ey + 4 * u), ImVec2(left + 4 * u, bottom - 3 * u), kOrange);
+    }
+    Text(dl, 17 * u, cx, ey + 9 * u, leave ? (g.leaving ? kOrangeLit : kWhite) : kGrey, g.leaving ? "PRESS A TO CONFIRM" : "EXIT GAME", 0.5f);
+
     // the footer: the game's black strip with its buttons
-    float foot = 30 * u, fy = size.y - foot / 2;
-    dl->AddRectFilled(ImVec2(0, size.y - foot), ImVec2(W, size.y), IM_COL32(4, 4, 8, 255));
-    Glyph(dl, u, cx - side + 12 * u, fy, IM_COL32(190, 34, 30, 255), "B", "Back");
+    float fy = bottom + foot / 2;
+    dl->AddRectFilled(ImVec2(left, bottom), ImVec2(right, bottom + foot), IM_COL32(4, 4, 8, 255));
+    Glyph(dl, u, left + 18 * u, fy, IM_COL32(190, 34, 30, 255), "B", "Back");
     Glyph(dl, u, cx - 40 * u, fy, IM_COL32(40, 150, 50, 255), "A", "Select");
-    Text(dl, 12 * u, cx + side, fy - 7.5f * u, kWhite, "LB / RB  PAGE", 1);
+    Text(dl, 12 * u, right - 12 * u, fy - 6 * u, kWhite, "LB / RB  PAGE", 1);
 }
 
 }  // namespace

@@ -163,6 +163,7 @@ uint64_t OneCoreMask();  // the fastest processor core, as an affinity mask (for
 uint64_t AllCoresBut(uint64_t mask);  // the cores the process may use, less those
 void PreciseWait(int64_t ns);  // sleeps that long without spinning, to well under a millisecond where the system can
 void ApplyDisplay();  // any thread
+inline bool g_render_classic = false;  // the frame drawn at the console's own 480 lines, whatever render_percent says
 struct Mode {
     uint32_t width, height;
 };
