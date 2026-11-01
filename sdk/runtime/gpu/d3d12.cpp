@@ -791,6 +791,8 @@ private:
     // texture_dump writes
     pack::Library pack_lib_;
     float place_a_ = 1.0f, place_b_ = 0.0f;  // this draw's sideways move (g_ortho_place)
+    bool extent_ok_ = false;                 // and the extent it was asked with, for a capture
+    float extent_[4] = {};
     std::unordered_map<uint64_t, PackTex> pack_cache_;
     std::unordered_set<uint64_t> hud_logged_;  // textures already named as drawn in 2D
     std::unordered_set<uint64_t> dumped_;
@@ -2422,15 +2424,21 @@ float3 Haze(int3 at, float3 c) {
 // the glow around bright pixels: a spiral of taps out to 3% of the height, what passes p2.x, added back at p2.y
 static const int kTaps = 24;
 static const float kRadius = 0.03;
+float GlowHere(int3 at);
 float3 Glow(float2 uv) {
     float w, h;
     t0.GetDimensions(w, h);
     float3 sum = 0;
+    float weight = 0.001;
     for (int n = 0; n < kTaps; n++) {
         float r = sqrt((n + 0.5) / kTaps) * kRadius, a = n * 2.39996;
-        sum += max(t0.SampleLevel(LinearSampler, uv + float2(cos(a) * r * h / w, sin(a) * r), 0).rgb - p2.x, 0);
+        float2 tap = uv + float2(cos(a) * r * h / w, sin(a) * r);
+        // what is close leaves the average, or the sky beside the golfer takes less than the sky around it: a dim ring
+        float t = GlowHere(int3(tap * float2(w, h), 0));
+        sum += max(t0.SampleLevel(LinearSampler, tap, 0).rgb - p2.x, 0) * t;
+        weight += t;
     }
-    return sum / kTaps * p2.y;
+    return sum / weight * p2.y;
 }
 // how much of the glow a pixel takes: none close to the camera, or the sky rings the golfer with a halo
 float GlowHere(int3 at) {
@@ -2571,6 +2579,7 @@ void D3D12Backend::ScenePass(const State& s) {
 }
 
 void D3D12Backend::RunScenePass() {
+    if (!g_scene_pass.load(std::memory_order_relaxed)) return;
     constexpr float kColor[3] = {0.62f, 0.69f, 0.73f};
     if (scene_done_ == frame_ || scene_frame_ != frame_ || scene_draws_ < kSceneMinDraws) return;
     Target* rt = FindTarget(scene_rt_, false);
@@ -3764,6 +3773,7 @@ void D3D12Backend::CaptureDraw(const State& s, uint32_t prim, uint32_t count, co
             k.src, k.dst, k.zen, k.zfunc, k.zwrite, k.zbias, k.zslope, k.cull, k.wmask, c.pc[0][0], c.pc[0][1],
             c.pc[0][2], c.pc[0][3]);
     // the alpha test (function, reference) and the fixed-function transform: why a draw leaves nothing behind
+    if (extent_ok_) fprintf(cap_, " ext %.3f %.3f %.3f %.3f", extent_[0], extent_[1], extent_[2], extent_[3]);
     fprintf(cap_, " atest %g %g wvp", c.misc[1], c.misc[0]);
     for (int i = 0; i < 16; i++) fprintf(cap_, " %g", c.wvp[i]);
     for (int m : {256, 2, 3}) {   // world, view, projection: the diagonal and the translation row
@@ -4060,7 +4070,7 @@ void D3D12Backend::Draw(const State& s, uint32_t prim, uint32_t start, uint32_t 
     g_perf.d_obs += ms(tp, t_obs);
     if (cap_ || ext_) FlushBatch();  // (a capture or an extension records between draws)
     if (cap_) CapStep(s.rt);
-    if (g_scene_pass.load(std::memory_order_relaxed)) ScenePass(s);
+    ScenePass(s);
     if (DepthCopy(s)) return;
     g_perf.d_early += ms(t_obs, DrawClock::now());
     DrawEnd draw_end{ext_};
@@ -4072,7 +4082,12 @@ void D3D12Backend::Draw(const State& s, uint32_t prim, uint32_t start, uint32_t 
     PerfClock::time_point t_or = DrawClock::now();
     if (g_ortho_place) {
         float x0, x1, y0, y1;
-        if (OrthoExtent(s, start, count, indices, x0, x1, y0, y1) && !g_ortho_place(s, x0, x1, y0, y1, place_a_, place_b_)) {
+        Target* scene = scene_frame_ == frame_ && scene_draws_ >= kSceneMinDraws ? FindTarget(scene_rt_, false) : nullptr;
+        g_in_scene = scene && scene->gw == guest_w_;
+        g_frame_no = frame_;
+        extent_ok_ = OrthoExtent(s, start, count, indices, x0, x1, y0, y1);
+        if (extent_ok_) std::copy_n(std::array<float, 4>{x0, x1, y0, y1}.begin(), 4, extent_);
+        if (extent_ok_ && !g_ortho_place(s, x0, x1, y0, y1, place_a_, place_b_)) {
             place_a_ = 1.0f;
             place_b_ = 0.0f;
         }
@@ -5270,7 +5285,7 @@ void D3D12Backend::Present(const Surface& front) {
     g_wait_display = WaitDisplayBlank;
     FlushBatch();
     PerfScope perf_present{g_perf.present};
-    if (g_scene_pass.load(std::memory_order_relaxed)) RunScenePass();
+    RunScenePass();
     if (cap_) {
         FinishCapture(front);
     } else if (CaptureOn() && (g_capture.exchange(false) || AutoCaptureDue())) {

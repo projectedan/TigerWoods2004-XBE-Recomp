@@ -121,6 +121,8 @@ inline std::atomic<bool> g_wide_targets{false};
 // set by a game: a pass over the finished 3D, before the first 2D draw of a frame with 3D in it. 0 off; bits: 1 distance
 // haze, 2 bloom, 4 depth of field, 16 ambient occlusion. Alone, tests: 8 distance as grey, 32 the occlusion as grey
 inline std::atomic<int> g_scene_pass{0};
+inline bool g_in_scene = false;  // the renderer: this frame has 3D on the screen's own target, as g_ortho_place is called
+inline uint64_t g_frame_no = 0;  // and which frame that is
 // its values: haze from this distance, thinning over this one, at most this much; what is brighter than this glows, by
 // this much; sharp to this distance, fully blurred at this one, by this share of the height
 inline std::atomic<float> g_haze_start{40}, g_haze_range{400}, g_haze_most{0.38f}, g_bloom_bright{0.62f}, g_bloom_glow{0.8f},

@@ -17,6 +17,8 @@
 #include "cpu/x86_context.h"
 #include "kernel/kernel.h"
 
+bool g_tw_hud_corners = true;  // [effects] hud_corners
+
 namespace {
 
 void Viewport(gpu::Viewport& v) {
@@ -41,10 +43,45 @@ void Projection(float* m) {
 }
 
 // 2D through an orthographic projection: held at 4:3, what covers the screen (fades) stays full
-bool Place(const gpu::State&, float x0, float x1, float, float, float& a, float& b) {
+bool Place(const gpu::State&, float x0, float x1, float y0, float y1, float& a, float& b) {
     if (!app::Widescreen() || (x0 < -0.97f && x1 > 0.97f)) return false;
     a = (4.0f / 3.0f) / app::FrameAspect();
     b = 0;
+    // on the course the HUD goes to the corners: its top and bottom strips, each already a left or a right piece, their
+    // ends (the plates behind the bars, at 1) on the screen's edges as on the console; the bars run past them.
+    // What crosses the middle (messages) and what lies between the strips (the marker, which follows the course) stays
+    bool strip = y1 < -0.56f || y0 > 0.6f, crossing = x0 < -0.1f && x1 > 0.1f;
+    // the main menu's content goes to the left edge: known by its swoosh, whose size holds as it slides in. Every piece
+    // moves with it, wherever it has slid to; the backgrounds, wider, stay, as do the golfer and the Select prompt
+    static uint64_t swoosh = 0;
+    uint64_t frame = gpu::g_frame_no;
+    if (std::fabs(x1 - x0 - 1.205f) < 0.01f && std::fabs(y1 - y0 - 2.071f) < 0.01f) swoosh = frame;
+    bool prompt = x0 > 0.6f && y1 < -0.8f;
+    if (g_tw_hud_corners && !gpu::g_in_scene && frame - swoosh <= 2 && x1 - x0 < 1.3f && !prompt) b = a - 1;
+    // the submenus' header across the whole frame: known by its EA logo. What spans the frame is already full width
+    // (above); the banner's other pieces join it, the bubbles among them whatever width they have scrolled to, and the
+    // logo and the title go to their sides. The tab row stays at 4:3: the plates at its ends fade the labels there
+    static uint64_t logo = 0;
+    bool badge = std::fabs(x1 - x0 - 0.228f) < 0.006f && std::fabs(y1 - y0 - 0.246f) < 0.006f && x0 < -0.9f;
+    if (badge) logo = frame;
+    if (g_tw_hud_corners && !gpu::g_in_scene && frame - logo <= 2 && y0 > 0.65f) {
+        float middle = (x0 + x1) / 2;
+        bool bubbles = y1 - y0 > 0.125f && y1 - y0 < 0.135f, title = middle > 0.2f && x0 >= 0.3f;
+        if (badge || (title && !bubbles)) {
+            b = (middle < 0 ? -1.0f : 1.0f) * (1 - a);
+        } else if (bubbles || x1 - x0 >= 0.15f) {
+            a = 1;
+            b = 0;
+        }
+    }
+    // the tab row's outer plates: their inner ends stay where they fade the labels, their outer ends reach the screen's
+    if (g_tw_hud_corners && !gpu::g_in_scene && frame - logo <= 2 && y0 > 0.6f && y0 <= 0.65f && (x0 < -1.1f || x1 > 1.1f) &&
+        x1 - x0 < 1) {
+        bool left = x0 < 0;
+        float inner = left ? x1 : x0, outer = left ? x0 : x1, at = a * inner, edge = left ? -1.01f : 1.01f;
+        a = (edge - at) / (outer - inner);
+        b = at - a * inner;
+    }
     return true;
 }
 
