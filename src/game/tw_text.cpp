@@ -10,11 +10,13 @@
 #include <windows.h>
 
 #include <atomic>
+#include <cctype>
 #include <cstdint>
 #include <cstring>
 #include <string>
 #include <utility>
 
+#include "core/log.h"
 #include "kernel/kernel.h"
 
 namespace {
@@ -62,6 +64,7 @@ void Rewrite(uint8_t* b, uint32_t hit) {
 
 void Scan() {
     uint8_t* b = kernel::g_base + kPhysical;
+    ULONGLONG t0 = GetTickCount64();
     for (const char* needle : {"Xbox", "memory units", "Memory Unit", "Hard Disk", "hard disk"}) {
         size_t n = std::strlen(needle);
         for (uint32_t i = 0; i + n < kSize;) {
@@ -72,11 +75,18 @@ void Scan() {
             i++;
         }
     }
+    LOGR("text: scan %llu ms", GetTickCount64() - t0);
 }
 
 }  // namespace
 
-void TW_FileOpened(const char*) { g_opened = GetTickCount64(); }
+// only the packages the text comes in: a scan takes the whole of memory through the cache, and the menus' golfers
+// open a package of their own every few seconds
+void TW_FileOpened(const char* name) {
+    std::string low = name;
+    for (char& c : low) c = char(std::tolower(uint8_t(c)));
+    if (low.find("fend.xbx") != std::string::npos || low.find("glbdata.xbx") != std::string::npos) g_opened = GetTickCount64();
+}
 
 // once, the game in memory
 void TW_TextStart() {

@@ -25,7 +25,7 @@
 #include "imgui.h"
 
 void TW_ApplyScene();
-extern bool g_tw_haze, g_tw_bloom, g_tw_focus, g_tw_ao, g_tw_hud_corners;
+extern bool g_tw_haze, g_tw_bloom, g_tw_focus, g_tw_ao, g_tw_hud_corners, g_tw_full_detail;
 extern float g_tw_haze_amount, g_tw_bloom_amount;
 
 namespace {
@@ -53,7 +53,8 @@ struct Row {
     float* amount = nullptr;
 };
 const std::vector<Row> kPages[2] = {
-    {{Kind::Mode, "WINDOW"}, {Kind::Resolution, "RESOLUTION"}, {Kind::VSync, "V-SYNC"}, {Kind::Tick, "HUD AT CORNERS", &g_tw_hud_corners}},
+    {{Kind::Mode, "WINDOW"}, {Kind::Resolution, "RESOLUTION"}, {Kind::VSync, "V-SYNC"}, {Kind::Tick, "HUD AT CORNERS", &g_tw_hud_corners},
+     {Kind::Tick, "FULL DETAIL TREES", &g_tw_full_detail}},
     {{Kind::Tick, "DISTANCE HAZE", &g_tw_haze},
      {Kind::Amount, "INTENSITY", nullptr, &g_tw_haze_amount},
      {Kind::Tick, "BLOOM", &g_tw_bloom},

@@ -139,6 +139,8 @@ inline bool (*g_wait_display)() = nullptr;
 inline std::atomic<uint32_t> g_present_interval{1};
 // the display may have changed (its mode, the window back in front): the blanks measure it again
 inline std::atomic<bool> g_display_changed{false};
+// Present is blocking: the blanks and its own every second refresh are a refresh apart. One refresh's delay lines them up
+inline std::atomic<bool> g_blank_slip{false};
 // the cores the render thread may use, 0 all of them (set by a game: its movies keep it on the game's core)
 inline std::atomic<uint64_t> g_render_mask{0};
 // set by a game: a scissor rectangle (x1, y1, x2, y2) the game sets; true drops it. Null for none.

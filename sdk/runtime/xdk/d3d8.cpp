@@ -376,53 +376,90 @@ void VerticalBlank(X86Context& ctx) {
     // The blank follows the display when its refresh is a whole multiple of 60 (60, 120, 240 Hz): each frame is on
     // screen for the same number of refreshes. On any other display (144 Hz), or where the wait does not work, it
     // stays on the clock, 60 a second. divisor: refreshes a blank, 0 not measured yet, -1 the clock.
+    // The blanks run on a timer of their own. The display's wait only steers that timer, from a thread of its own: it
+    // can come back early or late (seen in fullscreen: over half the frames at 20 to 28 ms, with nothing to do), and the
+    // game must not hang on it. A median of many waits, taken a little at a time, keeps the timer on the display.
     constexpr double kBlankUs = 16666.7;
-    int divisor = 0, off_count = 0, settled = 0;
+    constexpr double kAfterRefreshNs = 2000000;  // the blank's place after a refresh: frames never fall on the boundary
+    using ns = std::chrono::nanoseconds;
+    auto now_ns = [] { return double(std::chrono::duration_cast<ns>(clock::now().time_since_epoch()).count()); };
+    static std::atomic<double> measured{0};  // the median of a measure, 0 while it runs, -1 where the wait fails
+    static std::atomic<double> anchor{0}, refresh_ns{0};
+    static std::atomic<int> tracking{0};
+    int divisor = 0, settled = 0;
+    bool measuring = false;
+    double period = 0, last = 0;
     auto display_blank = [&] {
         if (gpu::g_display_changed.exchange(false)) {  // measured afresh, once the change has settled
-            divisor = off_count = 0;
+            divisor = 0;
             settled = 60;
+            tracking++;
             gpu::g_present_interval = 1;
         }
         if (divisor < 0 || !gpu::g_wait_display || !app::Get().vsync) return false;
         if (!divisor) {
-            // the median of many refreshes: a busy moment makes single waits long. Not during start-up.
+            // the median of many refreshes: a busy moment makes single waits long. Not during start-up
             if (++settled < 120) return false;
-            std::vector<double> gaps;
-            auto t0 = clock::now();
-            for (int i = 0; i < 33; i++) {
-                if (!gpu::g_wait_display()) {
-                    divisor = -1;
-                    return false;
-                }
-                auto t1 = clock::now();
-                if (i) gaps.push_back(std::chrono::duration<double, std::micro>(t1 - t0).count());
-                t0 = t1;
+            if (!measuring) {
+                measuring = true;
+                measured = 0;
+                std::thread([] {
+                    std::vector<double> gaps;
+                    auto t0 = clock::now();
+                    for (int i = 0; i < 65; i++) {
+                        if (!gpu::g_wait_display()) {
+                            measured = -1;
+                            return;
+                        }
+                        auto t1 = clock::now();
+                        if (i) gaps.push_back(std::chrono::duration<double, std::micro>(t1 - t0).count());
+                        t0 = t1;
+                    }
+                    std::nth_element(gaps.begin(), gaps.begin() + 32, gaps.end());
+                    measured = gaps[32];
+                }).detach();
             }
-            std::nth_element(gaps.begin(), gaps.begin() + 16, gaps.end());
-            double us = gaps[16];
+            double us = measured.load();
+            if (us == 0) return false;
+            measuring = false;
+            if (us < 0) {
+                divisor = -1;
+                return false;
+            }
             int d = int(std::lround(kBlankUs / std::max(us, 1.0)));
             bool whole = d >= 1 && d <= 8 && std::fabs(us * d - kBlankUs) < 300;
             divisor = whole ? d : -1;
             gpu::g_present_interval = whole ? uint32_t(d) : 1u;
             LOGR("d3d: display refresh %.2f Hz: %s", 1e6 / us, whole ? "blanks follow it" : "blanks stay on the clock");
             if (!whole) return false;
+            period = kBlankUs * 1000;  // the game's own 60 a second, steered to the display below
+            refresh_ns = period / d;
+            anchor = now_ns();
+            std::thread([gen = ++tracking, now_ns] {
+                std::vector<double> off;
+                while (tracking.load() == gen) {
+                    off.clear();
+                    for (int i = 0; i < 15; i++) {
+                        if (!gpu::g_wait_display()) return;
+                        double r = refresh_ns.load(), e = std::fmod(now_ns() - anchor.load(), r);
+                        off.push_back(e > r / 2 ? e - r : e < -r / 2 ? e + r : e);
+                    }
+                    std::nth_element(off.begin(), off.begin() + 7, off.end());
+                    // the waits are noisy and the display barely drifts (0.08 ms a second at 119.99 Hz): small errors stay,
+                    // and a step is too small to see. A quarter of each error moved frames by a millisecond in waves
+                    constexpr double kDeadNs = 400000, kStepNs = 40000;
+                    if (std::fabs(off[7]) > kDeadNs) anchor = anchor.load() + (off[7] > 0 ? kStepNs : -kStepNs);
+                }
+            }).detach();
         }
-        auto t0 = clock::now();
-        for (int i = 0; i < divisor; i++)
-            if (!gpu::g_wait_display()) {
-                divisor = -1;
-                return false;
-            }
-        // off the display's pace for half a second (moved to another screen, minimized): the clock takes over
-        double us = std::chrono::duration<double, std::micro>(clock::now() - t0).count();
-        off_count = std::fabs(us - kBlankUs) > 4000 ? off_count + 1 : 0;
-        if (off_count > 30) {
-            LOGR("d3d: blanks off the display's pace: measuring it again");
-            divisor = off_count = settled = 0;
-            gpu::g_present_interval = 1;
-            return false;
-        }
+        if (gpu::g_blank_slip.exchange(false)) anchor = anchor.load() + refresh_ns.load();
+        double a = anchor.load(), t = now_ns();
+        double target = a + std::ceil((t - a) / period) * period + kAfterRefreshNs;
+        if (target < last + period / 2) target += period;
+        last = target;
+        auto until = clock::time_point(std::chrono::duration_cast<clock::duration>(ns(int64_t(target))));
+        while (until - clock::now() > std::chrono::milliseconds(3)) std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        while (clock::now() < until) std::this_thread::yield();
         next = clock::now();
         return true;
     };

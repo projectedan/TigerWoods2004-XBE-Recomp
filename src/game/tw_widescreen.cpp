@@ -18,6 +18,7 @@
 #include "kernel/kernel.h"
 
 bool g_tw_hud_corners = true;  // [effects] hud_corners
+bool g_tw_full_detail = true;  // [effects] full_detail
 
 namespace {
 
@@ -50,7 +51,25 @@ bool Place(const gpu::State&, float x0, float x1, float y0, float y1, float& a, 
     // on the course the HUD goes to the corners: its top and bottom strips, each already a left or a right piece, their
     // ends (the plates behind the bars, at 1) on the screen's edges as on the console; the bars run past them.
     // What crosses the middle (messages) and what lies between the strips (the marker, which follows the course) stays
-    bool strip = y1 < -0.56f || y0 > 0.6f, crossing = x0 < -0.1f && x1 > 0.1f;
+    bool strip = y1 < -0.5f || y0 > 0.6f, crossing = x0 < -0.1f && x1 > 0.1f;
+    // the flag's marker follows the course and can rise into a strip: its box stays, and what is drawn inside it
+    static float box[4];
+    static uint64_t box_frame = 0;
+    uint64_t now = gpu::g_frame_no;
+    float wide = x1 - x0, high = y1 - y0, across = (x0 + x1) / 2, up = (y0 + y1) / 2;
+    bool marker = wide > 0.15f && wide < 0.5f && high > 0.12f && high < 0.5f && std::fabs(across) < 0.7f;
+    if (marker) {
+        box[0] = x0, box[1] = x1, box[2] = y0, box[3] = y1;
+        box_frame = now;
+    }
+    marker = marker || (box_frame == now && across > box[0] && across < box[1] && up > box[2] && up < box[3]);
+    // the pause menu's banner is the submenus' over the course: known by the dimming over the frame
+    static uint64_t logo = 0;
+    if (std::fabs(wide - 2.149f) < 0.01f && std::fabs(high - 2.0f) < 0.01f) logo = now;
+    bool header = now - logo <= 2;
+    // the panels over the strip's right end, the hint and the caddy's tip, go with it whole
+    bool panel = x0 > 0.2f && y0 > -0.625f && y1 < -0.3f;
+    if (g_tw_hud_corners && gpu::g_in_scene && (strip || panel) && !crossing && !marker && !header) b = (x0 + x1 < 0 ? -1.0f : 1.0f) * (1 - a);
     // the main menu's content goes to the left edge: known by its swoosh, whose size holds as it slides in. Every piece
     // moves with it, wherever it has slid to; the backgrounds, wider, stay, as do the golfer and the Select prompt
     static uint64_t swoosh = 0;
@@ -61,10 +80,9 @@ bool Place(const gpu::State&, float x0, float x1, float y0, float y1, float& a, 
     // the submenus' header across the whole frame: known by its EA logo. What spans the frame is already full width
     // (above); the banner's other pieces join it, the bubbles among them whatever width they have scrolled to, and the
     // logo and the title go to their sides. The tab row stays at 4:3: the plates at its ends fade the labels there
-    static uint64_t logo = 0;
     bool badge = std::fabs(x1 - x0 - 0.228f) < 0.006f && std::fabs(y1 - y0 - 0.246f) < 0.006f && x0 < -0.9f;
     if (badge) logo = frame;
-    if (g_tw_hud_corners && !gpu::g_in_scene && frame - logo <= 2 && y0 > 0.65f) {
+    if (g_tw_hud_corners && frame - logo <= 2 && y0 > 0.65f) {
         float middle = (x0 + x1) / 2;
         bool bubbles = y1 - y0 > 0.125f && y1 - y0 < 0.135f, title = middle > 0.2f && x0 >= 0.3f;
         if (badge || (title && !bubbles)) {
@@ -75,7 +93,7 @@ bool Place(const gpu::State&, float x0, float x1, float y0, float y1, float& a, 
         }
     }
     // the tab row's outer plates: their inner ends stay where they fade the labels, their outer ends reach the screen's
-    if (g_tw_hud_corners && !gpu::g_in_scene && frame - logo <= 2 && y0 > 0.6f && y0 <= 0.65f && (x0 < -1.1f || x1 > 1.1f) &&
+    if (g_tw_hud_corners && frame - logo <= 2 && y0 > 0.6f && y0 <= 0.65f && (x0 < -1.1f || x1 > 1.1f) &&
         x1 - x0 < 1) {
         bool left = x0 < 0;
         float inner = left ? x1 : x0, outer = left ? x0 : x1, at = a * inner, edge = left ? -1.01f : 1.01f;
@@ -124,10 +142,21 @@ void TW_TrailSource(X86Context& ctx, uint8_t* base) {
 // amount runs 0 to 1, a half being the look first settled on; depth of field and ambient occlusion are on or off, at
 // the strength judged right
 bool g_tw_haze = true, g_tw_bloom = true, g_tw_focus = true, g_tw_ao = true;
-float g_tw_haze_amount = 0.5f, g_tw_bloom_amount = 0.5f;
+float g_tw_haze_amount = 0.7f, g_tw_bloom_amount = 0.5f;
+
+// each object's level of detail (0x75DC0): by its distance it gets a level (+0x1D), the next one it dissolves into
+// (+0x1E) and how far through that it is (+0x20), so trees flanking a course cross over in sight. All kept at the first
+// level, the full model, they never change.
+void TW_ObjectDetail(X86Context& ctx, uint8_t* base) {
+    if (!g_tw_full_detail) return;
+    uint32_t object = ctx.ecx + ctx.ebp;
+    base[object + 0x1D] = 0;
+    base[object + 0x1E] = 0;
+    ::kernel::W32(object + 0x20, 0);
+}
 
 void TW_ApplyScene() {
-    gpu::g_haze_most = g_tw_haze_amount * 0.76f;
+    gpu::g_haze_most = g_tw_haze_amount * 0.76f;  // at 0.7, the strength chosen with full detail trees
     gpu::g_bloom_glow = g_tw_bloom_amount * 1.6f;
     gpu::g_focus_blur = 0.05f * 0.016f;
     gpu::g_ao_strength = 0.35f * 3;
@@ -142,6 +171,7 @@ void TW_Window(void*) {
     TW_TextScan();
     gpu::g_viewport_hook = Viewport;
     gpu::g_scissor_hook = Scissor;
+    if (const char* e = std::getenv("TW_FULL_DETAIL")) g_tw_full_detail = std::atoi(e) != 0;  // testing
     const char* pass = std::getenv("TW_SCENE_PASS");  // testing: start in that view
     TW_ApplyScene();
     if (pass) gpu::g_scene_pass = std::atoi(pass);

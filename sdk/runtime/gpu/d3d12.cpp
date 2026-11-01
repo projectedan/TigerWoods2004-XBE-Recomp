@@ -1401,6 +1401,7 @@ bool D3D12Backend::EnsureQueries() {
 }
 
 void D3D12Backend::BeginQuery() {
+    RunScenePass();  // first: inside a query its full screen counts as visible, and the sun's glare goes white
     FlushBatch();
     if (!EnsureQueries()) return;
     if (query_active_ >= 0) cl_->EndQuery(query_heap_.Get(), D3D12_QUERY_TYPE_OCCLUSION, UINT(query_active_));  // left unnamed
@@ -5337,7 +5338,24 @@ void D3D12Backend::Present(const Surface& front) {
     fg_ready_ = false;
     bool vsync = app::Get().vsync;
     auto perf_swap = PerfClock::now();
+    auto present_start = std::chrono::steady_clock::now();
     HRESULT hr = swap_->Present(vsync ? g_present_interval.load() : 0, !vsync && tearing_ ? DXGI_PRESENT_ALLOW_TEARING : 0);
+    // V-Sync at every second refresh (a 120 Hz screen): the frames' blanks fall on either of its two slots, by chance of
+    // when they began. On the wrong one each Present waits most of a frame, and frames arrive unevenly at a steady 60
+    static double blocked_ms = 0;
+    static int blocked_frames = 0;
+    blocked_ms += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - present_start).count();
+    if (!vsync || g_present_interval.load() < 2) {
+        blocked_ms = 0;
+        blocked_frames = 0;
+    } else if (++blocked_frames == 30) {
+        if (blocked_ms / blocked_frames > 5) {
+            LOGR("present: %.1f ms blocked a frame: moving the blanks a refresh", blocked_ms / blocked_frames);
+            g_blank_slip = true;
+        }
+        blocked_ms = 0;
+        blocked_frames = 0;
+    }
     g_perf.swap += PerfMs(perf_swap);
     // the driver gone (a GPU timeout on a card asked too much of, a driver crash or update): nothing drawn reaches the
     // screen again, so end with the reason rather than show a frozen picture

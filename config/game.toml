@@ -312,3 +312,7 @@ call = "TW_MovieIdle"
 [[hook]]                   # camera flight's trail: the rectangle of the last frame it reads, the whole frame like the viewport
 at = 0x0007415A
 call = "TW_TrailSource"
+
+[[hook]]                   # an object's detail: its level, the level it blends to and how far, just stored for this frame
+at = 0x000761DE
+call = "TW_ObjectDetail"

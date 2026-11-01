@@ -9,7 +9,7 @@ bool TW_MenuOpen();
 void TW_MenuFonts();
 void TW_FileOpened(const char* name);  // src/game/tw_text.cpp
 void TW_TextStart();
-extern bool g_tw_haze, g_tw_bloom, g_tw_focus, g_tw_ao, g_tw_hud_corners;
+extern bool g_tw_haze, g_tw_bloom, g_tw_focus, g_tw_ao, g_tw_hud_corners, g_tw_full_detail;
 extern float g_tw_haze_amount, g_tw_bloom_amount;
 
 // what the runtime asks of the game; strings must be set, hooks may stay null
@@ -29,7 +29,8 @@ const app::GameInfo app::kGame = {
                 {"effects", "bloom_intensity", cfg::Type::Float, "Bloom intensity", "", nullptr, nullptr, nullptr, 0, 100, {}, nullptr, &g_tw_bloom_amount},
                 {"effects", "depth_of_field", cfg::Type::Bool, "Depth of field", "The far distance softens.", &g_tw_focus},
                 {"effects", "ambient_occlusion", cfg::Type::Bool, "Ambient occlusion", "Soft shade where things meet the ground and each other.", &g_tw_ao},
-                {"effects", "hud_corners", cfg::Type::Bool, "HUD at corners", "On a wide screen, the HUD sits in the corners.", &g_tw_hud_corners}},
+                {"effects", "hud_corners", cfg::Type::Bool, "HUD at corners", "On a wide screen, the HUD sits in the corners.", &g_tw_hud_corners},
+                {"effects", "full_detail", cfg::Type::Bool, "Full detail trees", "Trees keep their full model at any distance.", &g_tw_full_detail}},
     .load = nullptr,                      // reads more from the settings file's toml::table
     .save = nullptr,                      // writes more into it
     .init = nullptr,                      // after the settings load, before the window and boot
