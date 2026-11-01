@@ -202,6 +202,7 @@ std::recursive_mutex& UiLock();
 
 // what the game repo defines once
 using Option = cfg::Desc;  // a game setting in the settings file, described for a launcher
+inline std::atomic<float> g_backdrop_blur{0};  // the frame blurred behind a game's menu, 0 to 1
 struct GameInfo {
     const wchar_t* title;        // window and splash
     const wchar_t* short_title;  // message boxes
@@ -238,6 +239,10 @@ struct GameInfo {
     std::vector<const char*> live_settings;
     void (*save_settings)() = nullptr;                // the menu closed after a change: null saves the settings file
     void (*setting_changed)(const cfg::Desc&) = nullptr;  // the menu changed one, at once
+    // a game's own menu in place of this one: what opens this opens that. menu_open: it is up, so the keys leave the game
+    void (*menu_toggle)() = nullptr;
+    bool (*menu_open)() = nullptr;
+    void (*fonts)() = nullptr;  // ImGui is up, its font atlas not built: a game's fonts
     // the keyboard in the game's own menus: in_menus says when they are up (the front end, not a pause in a level);
     // there the keys bound to Start press B, so Esc goes back, and with menu_accept_start the keys bound to A press
     // Start (a game whose menus take Start to go on, "press start" among them); with menu_start_with_a they press

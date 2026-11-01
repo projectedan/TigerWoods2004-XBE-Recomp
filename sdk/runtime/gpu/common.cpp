@@ -31,12 +31,27 @@ float4 psmain(O i) : SV_Target {
     float4 c = 0;
     int n = max((int)opts.z, 1);
     float2 px = fwidth(i.uv);
-    for (int y = 0; y < n; y++)
-        for (int x = 0; x < n; x++) c += img.SampleLevel(ls, i.uv + px * ((float2(x, y) + 0.5) / n - 0.5), 0);
-    c /= n * n;
+    if (sharp.w > 0) {
+        // behind a game's menu: a disc of sharp.w pixels, its taps on a golden angle spiral turned a little per pixel
+        // (noise, not ghosts), weighted to the centre
+        float turn = frac(52.9829189 * frac(dot(i.p.xy, float2(0.06711056, 0.00583715)))) * 6.2831853;
+        float w = 0;
+        for (int k = 0; k < 64; k++) {
+            float t = (k + 0.5) / 64;
+            float a = turn + k * 2.39996323;
+            float tw = exp(-2.5 * t);
+            c += img.SampleLevel(ls, i.uv + px * sharp.w * sqrt(t) * float2(cos(a), sin(a)), 0) * tw;
+            w += tw;
+        }
+        c /= w;
+    } else {
+        for (int y = 0; y < n; y++)
+            for (int x = 0; x < n; x++) c += img.SampleLevel(ls, i.uv + px * ((float2(x, y) + 0.5) / n - 0.5), 0);
+        c /= n * n;
+    }
     // sharpening (sharp.x 0..1), contrast adaptive as AMD's CAS: the cross of source texels around this one sets how
     // much each neighbour is taken away, less where the contrast is already high, so edges get no haloes
-    if (sharp.x > 0) {
+    if (sharp.x > 0 && sharp.w <= 0) {
         float2 t = sharp.yz;
         float3 a = img.SampleLevel(ls, i.uv + float2(0, -t.y), 0).rgb, b = img.SampleLevel(ls, i.uv + float2(-t.x, 0), 0).rgb;
         float3 d = img.SampleLevel(ls, i.uv + float2(t.x, 0), 0).rgb, e = img.SampleLevel(ls, i.uv + float2(0, t.y), 0).rgb;

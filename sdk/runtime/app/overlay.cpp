@@ -62,6 +62,7 @@ void MaskHeld() {
 }
 
 void Open() {
+    if (kGame.menu_toggle) return kGame.menu_toggle();
     if (g_open.exchange(true)) return;
     MaskHeld();
     LOGR("menu: open");
@@ -256,7 +257,7 @@ void FeedPads() {
 
 }  // namespace
 
-bool OverlayOpen() { return g_open.load(); }
+bool OverlayOpen() { return g_open.load() || (kGame.menu_open && kGame.menu_open()); }
 bool Paused() { return g_open.load() || (Get().pause_unfocused && !g_focus.load()); }
 bool Held() { return g_held.load(); }
 bool Muted() { return g_held.load() || (Get().mute_unfocused && !g_focus.load()); }
@@ -265,6 +266,7 @@ bool Focused() { return g_focus.load(); }
 
 void SetFocus(bool focus) {
     if (g_focus.exchange(focus) == focus) return;
+    if (focus) gpu::g_display_changed = true;
     // keys held across the switch (Alt-Tab's Alt) wait to be let go, and taps from before it are dropped
     keys::Swallow();
     if (Get().pause_unfocused || Get().mute_unfocused || !Get().background_input)
@@ -388,6 +390,7 @@ void OverlayInit() {
     g_font = io.Fonts->AddFontFromMemoryCompressedTTF(overlay_font_compressed_data, int(overlay_font_compressed_size),
                                                       kFontPixels, &fc, kRanges);
     io.FontDefault = g_font;
+    if (kGame.fonts) kGame.fonts();
     io.BackendFlags |= ImGuiBackendFlags_HasGamepad;  // FeedPads; the Win32 backend's XInput reading is compiled out
     ImGuiStyle& st = ImGui::GetStyle();
     ImGui::StyleColorsDark(&st);

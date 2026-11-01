@@ -379,6 +379,11 @@ void VerticalBlank(X86Context& ctx) {
     constexpr double kBlankUs = 16666.7;
     int divisor = 0, off_count = 0, settled = 0;
     auto display_blank = [&] {
+        if (gpu::g_display_changed.exchange(false)) {  // measured afresh, once the change has settled
+            divisor = off_count = 0;
+            settled = 60;
+            gpu::g_present_interval = 1;
+        }
         if (divisor < 0 || !gpu::g_wait_display || !app::Get().vsync) return false;
         if (!divisor) {
             // the median of many refreshes: a busy moment makes single waits long. Not during start-up.
@@ -400,7 +405,7 @@ void VerticalBlank(X86Context& ctx) {
             bool whole = d >= 1 && d <= 8 && std::fabs(us * d - kBlankUs) < 300;
             divisor = whole ? d : -1;
             gpu::g_present_interval = whole ? uint32_t(d) : 1u;
-            LOGI("d3d: display refresh %.2f Hz: %s", 1e6 / us, whole ? "blanks follow it" : "blanks stay on the clock");
+            LOGR("d3d: display refresh %.2f Hz: %s", 1e6 / us, whole ? "blanks follow it" : "blanks stay on the clock");
             if (!whole) return false;
         }
         auto t0 = clock::now();
@@ -413,7 +418,8 @@ void VerticalBlank(X86Context& ctx) {
         double us = std::chrono::duration<double, std::micro>(clock::now() - t0).count();
         off_count = std::fabs(us - kBlankUs) > 4000 ? off_count + 1 : 0;
         if (off_count > 30) {
-            divisor = -1;
+            LOGR("d3d: blanks off the display's pace: measuring it again");
+            divisor = off_count = settled = 0;
             gpu::g_present_interval = 1;
             return false;
         }

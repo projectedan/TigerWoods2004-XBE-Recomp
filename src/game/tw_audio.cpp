@@ -12,22 +12,29 @@
 #include "cpu/x86_context.h"
 #include "imgui.h"
 
+void TW_MenuUi();                  // tw_menu.cpp
+bool TW_MenuKey(uintptr_t key);
+
 namespace {
 std::chrono::steady_clock::time_point g_shown, g_movie_seen;
+const char* g_label = "";
 }
 
 bool TW_Message(void*, uint32_t msg, uintptr_t wp, intptr_t lp, intptr_t*) {
     constexpr uint32_t kKeyDown = 0x100;
     constexpr uintptr_t kF9 = 0x78;
+    if (msg == kKeyDown && TW_MenuKey(wp)) return true;
     if (msg != kKeyDown || wp != kF9 || (lp & (1 << 30))) return false;
+    g_shown = std::chrono::steady_clock::now();
     bool on = !audio::g_sinc.load();
     audio::g_sinc = on;
-    g_shown = std::chrono::steady_clock::now();
+    g_label = on ? "Resampler: sinc (new)" : "Resampler: linear (old)";
     LOGI("audio: resampler %s", on ? "sinc" : "linear");
     return true;
 }
 
 void TW_Ui(double) {
+    TW_MenuUi();
     // TW_FRAMES set: frame times over each 5 s, test only
     static const bool frames = std::getenv("TW_FRAMES") != nullptr;
     if (frames) {
@@ -55,8 +62,7 @@ void TW_Ui(double) {
     if (gpu::g_render_mask.load() && std::chrono::steady_clock::now() - g_movie_seen > std::chrono::milliseconds(300))
         gpu::g_render_mask = 0;
     if (std::chrono::steady_clock::now() - g_shown > std::chrono::seconds(2)) return;
-    ImGui::GetForegroundDrawList()->AddText(ImVec2(24, 24), IM_COL32(255, 255, 255, 255),
-                                            audio::g_sinc.load() ? "Resampler: sinc (new)" : "Resampler: linear (old)");
+    ImGui::GetForegroundDrawList()->AddText(ImVec2(24, 24), IM_COL32(255, 255, 255, 255), g_label);
 }
 
 // Movies. The loop (0xF9360) spins until 30.3 ms after each swap, which on the console leaves the frame on the next

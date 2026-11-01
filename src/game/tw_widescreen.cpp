@@ -3,8 +3,10 @@
 // capture) and scales its 2D by 0.9 and 0.933 to match. The viewport opens to the whole frame. On a wide display the
 // projection's horizontal term and the vertex programs' positions narrow by 4:3 / the frame's shape, so the same
 // vertical view shows more at the sides, and the 2D is held at 4:3 in the middle.
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 
 #include "app/app.h"
@@ -62,12 +64,48 @@ void TW_FrustumWidth(X86Context& ctx, uint8_t* base) {
     ::kernel::W32(at, bits);
 }
 
+// the camera flight's trail (0x73F60) lays the last frame over this one, read from the view's rectangle as fractions
+// of the frame, here just scaled into the TV-safe border (0x73490): left and top, then right and bottom, on the stack.
+// The quad fills the viewport, opened above to the whole frame, so reading the border's rectangle enlarged the last
+// frame by 7% a frame, and the trail became a tunnel.
+void TW_TrailSource(X86Context& ctx, uint8_t* base) {
+    (void)base;
+    uint32_t bits = ::kernel::R32(ctx.esp + 0x58);
+    float left;
+    std::memcpy(&left, &bits, 4);
+    LOG_FIRST(4, "tw: trail source left %.4f", left);
+    if (std::fabs(left - 0.05f) > 0.001f) return;
+    const float one = 1.0f;
+    std::memcpy(&bits, &one, 4);
+    ::kernel::W32(ctx.esp + 0x58, 0);
+    ::kernel::W32(ctx.esp + 0x5C, 0);
+    ::kernel::W32(ctx.esp + 0x68, bits);
+    ::kernel::W32(ctx.esp + 0x6C, bits);
+}
+
+// [effects]: the pass over the 3D (gpu::g_scene_pass), on and off and how strong, from the menu (tw_menu.cpp). Each
+// amount runs 0 to 1, a half being the look first settled on; depth of field and ambient occlusion are on or off, at
+// the strength judged right
+bool g_tw_haze = true, g_tw_bloom = true, g_tw_focus = true, g_tw_ao = true;
+float g_tw_haze_amount = 0.5f, g_tw_bloom_amount = 0.5f;
+
+void TW_ApplyScene() {
+    gpu::g_haze_most = g_tw_haze_amount * 0.76f;
+    gpu::g_bloom_glow = g_tw_bloom_amount * 1.6f;
+    gpu::g_focus_blur = 0.05f * 0.016f;
+    gpu::g_ao_strength = 0.35f * 3;
+    gpu::g_scene_pass = (g_tw_haze ? 1 : 0) | (g_tw_bloom ? 2 : 0) | (g_tw_focus ? 4 : 0) | (g_tw_ao ? 16 : 0);
+}
+
 void TW_Sample();  // tw_sample.cpp, test only
 
 void TW_Window(void*) {
     TW_Sample();
     gpu::g_viewport_hook = Viewport;
     gpu::g_scissor_hook = Scissor;
+    const char* pass = std::getenv("TW_SCENE_PASS");  // testing: start in that view
+    TW_ApplyScene();
+    if (pass) gpu::g_scene_pass = std::atoi(pass);
     gpu::g_projection_hook = Projection;
     gpu::g_ortho_place = Place;
     if (app::Widescreen()) {

@@ -6,7 +6,9 @@
 
 #include "core/input.h"
 
-void TW_Pad(int port, input::Pad& pad) {
+void TW_MenuPad(int port, input::Pad& pad);  // tw_menu.cpp
+
+static void AutoPad(int port, input::Pad& pad) {
     static float first = -1, last = 0, period = 2;
     static const bool on = [] {
         const char* e = std::getenv("TW_AUTOPAD");
@@ -21,4 +23,9 @@ void TW_Pad(int port, input::Pad& pad) {
     pad.connected = true;
     if (step & 1) pad.analog[0] = 255;  // A
     else pad.buttons |= 0x10;           // Start
+}
+
+void TW_Pad(int port, input::Pad& pad) {
+    AutoPad(port, pad);
+    TW_MenuPad(port, pad);
 }

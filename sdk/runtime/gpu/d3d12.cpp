@@ -363,6 +363,7 @@ struct BlitOptions {
     float texel[2] = {0, 0};
     bool hdr = false;         // to the HDR (scRGB) screen: linear, highlights raised (kBlitHlsl)
     bool look = false;        // through [graphics] colour_look
+    float blur = 0;           // a disc blur of this radius in target pixels
 };
 
 // the colour looks, ROTK Fix's own numbers: contrast, pivot, saturation, vibrance, gamma, shadow tint, light tint
@@ -576,6 +577,8 @@ private:
               float blend) override;
     ID3D12PipelineState* EnsurePassPipeline(const char* hlsl, const char* entry, DXGI_FORMAT rtv, float blend);
     // Draw, in call order, each callee right after its caller
+    void ScenePass(const State& s);
+    void RunScenePass();
     bool DepthCopy(const State& s);
     bool DepthCopyCheck(const State& s);
     ID3D12PipelineState* EnsureDepthCopyPipeline();
@@ -742,6 +745,15 @@ private:
     uint64_t fence_value_ = 0;
     Frame frames_[kFrames];
     uint64_t frame_ = 0;
+    uint64_t scene_frame_ = ~0ull, scene_done_ = ~0ull;  // the frame scene_draws_ counts, the last with its pass
+    uint32_t scene_draws_ = 0;
+    Surface scene_rt_{}, scene_zs_{};  // what those draws went to
+    float scene_z_[2] = {};  // the 3D projection's depth terms: depth = [0] + [1] / distance
+    const float* pass_more_ = nullptr;  // sixteen more floats for Pass's b1
+    float scene_xy_[2] = {};            // the same projection's width and height terms
+    ComPtr<ID3D12Resource> ao_;         // the ambient occlusion, as much light as gets in
+    D3D12_RESOURCE_STATES ao_state_ = D3D12_RESOURCE_STATE_RENDER_TARGET;
+    int scene_votes_ = 0;
     Recorder cl_;  // the command list, recorded on worker threads (d3d12_record.h)
     ComPtr<ID3D12DescriptorHeap> srv_heap_;
     ComPtr<ID3D12DescriptorHeap> smp_heap_;
@@ -2133,7 +2145,7 @@ void D3D12Backend::Blit(ID3D12Resource* src, DXGI_FORMAT fmt, const float uvrect
     float strength = o.look && li ? std::min(st.look_strength, 100u) / 100.0f : 0.0f;
     float c[32] = {uvrect[0], uvrect[1], uvrect[2], uvrect[3],
                    o.gamma ? 1.0f : 0.0f, o.alpha ? 1.0f : 0.0f, float(o.taps), o.mul,
-                   o.sharpen, o.texel[0], o.texel[1], 0,
+                   o.sharpen, o.texel[0], o.texel[1], o.blur,
                    o.hdr ? 1.0f : 0.0f, hdr_paper_, hdr_peak_ / hdr_paper_, 0,
                    L.contrast, L.pivot, L.sat, L.vibrance,
                    L.gamma, strength, 0, 0,
@@ -2372,6 +2384,7 @@ void D3D12Backend::Pass(const char* hlsl, const char* entry, DXGI_FORMAT rtv, D3
     }
     Alloc cb = Upload(256, 256);
     std::memcpy(cb.cpu, p, 8 * sizeof(float));
+    if (pass_more_) std::memcpy(reinterpret_cast<char*>(cb.cpu) + 8 * sizeof(float), pass_more_, 16 * sizeof(float));
     cl_->OMSetRenderTargets(1, &rh, FALSE, nullptr);
     SetFullViewport(w, h);
     if (blend >= 0) {
@@ -2381,6 +2394,229 @@ void D3D12Backend::Pass(const char* hlsl, const char* entry, DXGI_FORMAT rtv, D3
     }
     DrawFullScreen(pso, cb.gpu, slot);
     bound_rt_ = bound_ds_ = nullptr;
+}
+
+// p0: depth = x + y / distance, haze from distance z, thinning over w. p1: the haze's colour, its most (a).
+// p2: x glows past this, y by this much, z sharp to this distance, w fully blurred here. p3: x the blur, of the height,
+// y and z the projection's width and height terms, w the occlusion's strength. p4: x what is on, as g_scene_pass
+const char kScenePass[] = R"(
+Texture2D t0 : register(t0);
+Texture2D<float> t1 : register(t1);
+Texture2D<float> t2 : register(t2);
+SamplerState LinearSampler : register(s0);
+cbuffer P : register(b1) { float4 p0; float4 p1; float4 p2; float4 p3; float4 p4; };
+struct O { float4 p : SV_Position; float2 uv : TEXCOORD0; };
+O vs(uint id : SV_VertexID) {
+    O o;
+    o.uv = float2((id << 1) & 2, id & 2);
+    o.p = float4(o.uv * float2(2, -2) + float2(-1, 1), 0, 1);
+    return o;
+}
+float Distance(float d) { return p0.y / max(d - p0.x, 1e-7); }
+float3 Haze(int3 at, float3 c) {
+    float d = t1.Load(at);
+    if (d < 1e-6) return c;  // depth as cleared: sky, and water, which writes none over nothing
+    float f = p1.a * (1 - exp(-max(Distance(d) - p0.z, 0) / p0.w));
+    return lerp(c, p1.rgb, f);
+}
+// the glow around bright pixels: a spiral of taps out to 3% of the height, what passes p2.x, added back at p2.y
+static const int kTaps = 24;
+static const float kRadius = 0.03;
+float3 Glow(float2 uv) {
+    float w, h;
+    t0.GetDimensions(w, h);
+    float3 sum = 0;
+    for (int n = 0; n < kTaps; n++) {
+        float r = sqrt((n + 0.5) / kTaps) * kRadius, a = n * 2.39996;
+        sum += max(t0.SampleLevel(LinearSampler, uv + float2(cos(a) * r * h / w, sin(a) * r), 0).rgb - p2.x, 0);
+    }
+    return sum / kTaps * p2.y;
+}
+// how much of the glow a pixel takes: none close to the camera, or the sky rings the golfer with a halo
+float GlowHere(int3 at) {
+    float d = t1.Load(at);
+    return d < 1e-6 ? 1 : smoothstep(10, 40, Distance(d));
+}
+// depth of field: sharp to p2.z, blurred up to p3.x of the height at p2.w. A tap counts if it is itself blurred as
+// far as it lies from this pixel, so what is sharp stays out of the blur behind it and edges stay clean
+static const int kFocusTaps = 16;
+float Coc(float d) { return d < 1e-6 ? 1 : smoothstep(p2.z, p2.w, Distance(d)); }
+float3 Focus(int3 at, float2 uv, float3 c) {
+    float coc = Coc(t1.Load(at));
+    if (coc < 0.01) return c;
+    float w, h;
+    t0.GetDimensions(w, h);
+    float3 sum = c;
+    float weight = 1;
+    for (int n = 0; n < kFocusTaps; n++) {
+        float r = sqrt((n + 0.5) / kFocusTaps) * coc, a = n * 2.39996;
+        float2 tap = uv + float2(cos(a) * h / w, sin(a)) * r * p3.x;
+        float t = saturate((Coc(t1.Load(int3(tap * float2(w, h), 0))) - r) * 8 + 1);
+        sum += t0.SampleLevel(LinearSampler, tap, 0).rgb * t;
+        weight += t;
+    }
+    return sum / weight;
+}
+// ambient occlusion: how much of the half space above this pixel the depth around it fills, out to a reach that grows
+// with distance (kAoRadius + kAoGrow per unit), so far tree lines shade the ground under them. Only smooth surfaces
+// take it: the depth of leaves is broken, and they blotch. Taps turned on a 4 x 4 pattern, which Light's 4 x 4 average
+// takes out. Fades by kAoFar: depth is too coarse past that
+static const int kAoTaps = 12;
+static const float kAoRadius = 0.9, kAoGrow = 0.03, kAoFade = 250, kAoFar = 450, kAoBias = 0.25, kAoDark = 2.2;
+float3 ViewAt(int2 at, float w, float h) {
+    float z = Distance(t1.Load(int3(at, 0)));
+    float2 uv = (at + 0.5) / float2(w, h);
+    return float3((uv.x * 2 - 1) * z / p3.y, (1 - uv.y * 2) * z / p3.z, z);
+}
+float ao(O i) : SV_Target {
+    int2 at = int2(i.p.xy);
+    if (t1.Load(int3(at, 0)) < 1e-6) return 1;
+    float w, h;
+    t1.GetDimensions(w, h);
+    float3 c = ViewAt(at, w, h);
+    if (c.z > kAoFar) return 1;
+    // the surface: toward the nearer neighbour on each axis, so an edge does not bend it
+    float3 l = ViewAt(at - int2(1, 0), w, h) - c, r = ViewAt(at + int2(1, 0), w, h) - c;
+    float3 u = ViewAt(at - int2(0, 1), w, h) - c, d = ViewAt(at + int2(0, 1), w, h) - c;
+    float3 dx = abs(l.z) < abs(r.z) ? -l : r, dy = abs(u.z) < abs(d.z) ? -u : d;
+    float3 n = normalize(cross(dx, dy));
+    if (n.z > 0) n = -n;
+    // smooth: the two sides of this pixel run on from each other, whatever the slope
+    float eps = c.z * 0.0005;
+    float bend = max(abs(l.z + r.z) / (abs(l.z) + abs(r.z) + eps), abs(u.z + d.z) / (abs(u.z) + abs(d.z) + eps));
+    float smooth = 1 - smoothstep(0.45, 0.9, bend);
+    if (smooth <= 0) return 1;
+    float radius = kAoRadius + c.z * kAoGrow;
+    float turn = ((at.x & 3) + (at.y & 3) * 4 + 0.5) / 16 * 6.2831853;
+    float reach = min(radius * p3.z / c.z * 0.5, 0.08);  // of the height
+    float occ = 0, weights = 0;
+    for (int k = 0; k < kAoTaps; k++) {
+        float q = sqrt((k + 0.5) / kAoTaps), a = turn + k * 2.39996;
+        int2 tap = at + int2(float2(cos(a), sin(a)) * q * reach * h);
+        float near = 1 - 0.7 * q;  // what touches counts most
+        weights += near;
+        if (t1.Load(int3(tap, 0)) < 1e-6) continue;
+        float3 v = ViewAt(tap, w, h) - c;
+        float len = length(v);
+        occ += saturate(dot(n, v) / max(len, 1e-3) - kAoBias) * saturate(1 - len / (radius * 1.5)) * near;
+    }
+    // the ground takes it most: what stands on it, bodies and trunks, would turn black at that strength
+    float dark = kAoDark * lerp(0.6, 2.0, smoothstep(0.5, 0.85, n.y));
+    return lerp(saturate(1 - occ / weights * dark * smooth), 1, smoothstep(kAoFade, kAoFar, c.z));
+}
+// the occlusion here: the 4 x 4 around it, of what lies at this pixel's depth
+float Light(int3 at) {
+    float own = Distance(t1.Load(at)), sum = 0, weight = 0.001;
+    for (int y = -2; y < 2; y++)
+        for (int x = -2; x < 2; x++) {
+            int3 tap = at + int3(x, y, 0);
+            float t = abs(Distance(t1.Load(tap)) - own) < 0.5 + own * 0.03 ? 1 : 0;
+            sum += t2.Load(tap) * t;
+            weight += t;
+        }
+    return sum / weight;
+}
+float4 scene(O i) : SV_Target {
+    int3 at = int3(i.p.xy, 0);
+    int on = int(p4.x);
+    float4 c = t0.Load(at);
+    float3 o = (on & 4) ? Focus(at, i.uv, c.rgb) : c.rgb;
+    if ((on & 16) && t1.Load(at) >= 1e-6) o *= pow(Light(at), p3.w);
+    if (on & 1) o = Haze(at, o);
+    if (on & 2) o += Glow(i.uv) * GlowHere(at);
+    return float4(o, c.a);
+}
+float4 aoview(O i) : SV_Target { return float4(pow(Light(int3(i.p.xy, 0)), p3.w).xxx, 1); }
+float4 grey(O i) : SV_Target { return float4(saturate(Distance(t1.Load(int3(i.p.xy, 0))) / 1000).xxx, 1); }
+)";
+
+constexpr uint32_t kSceneMinDraws = 20;  // of 3D in a frame: what counts as a scene
+
+// once a frame, at the first draw that ignores depth after 3D that wrote it: the 2D over the finished 3D. A frame
+// without 2D (flyovers, the golfer's entrance, the ball in flight) gets it from Present
+void D3D12Backend::ScenePass(const State& s) {
+    constexpr uint32_t kGequal = 0x206, kAlways = 0x207, kProjectionTransform = 3;
+    if (scene_done_ == frame_ || !s.rs[kRsZEnable]) return;
+    uint32_t func = SimpleState(s, kMZFunc);
+    bool writes = SimpleState(s, kMZWriteEnable) != 0;
+    if (writes && func == kGequal) {
+        if (scene_frame_ != frame_ || s.rt.data != scene_rt_.data) {
+            scene_draws_ = 0;
+            scene_votes_ = 0;
+            scene_rt_ = s.rt;
+            scene_zs_ = s.zs;
+        }
+        scene_frame_ = frame_;
+        scene_draws_++;
+        // the projection most of these draws use (a majority vote), read here as the game thread is on a later frame
+        // by now: a small 3D picture over the course has its own (the ball's spin), and would stand for the whole frame
+        const auto& m = s.transforms[kProjectionTransform];
+        if (m[11] > 0.99f && m[11] < 1.01f && std::fabs(m[15]) < 0.001f) {
+            if (scene_votes_ == 0) {
+                scene_z_[0] = m[10];
+                scene_z_[1] = m[14];
+                scene_xy_[0] = std::fabs(m[0]);
+                scene_xy_[1] = std::fabs(m[5]);
+            }
+            scene_votes_ += m[10] == scene_z_[0] && m[14] == scene_z_[1] ? 1 : -1;
+        }
+        return;
+    }
+    // (the shadow's masks ignore depth too, but write alpha alone, and come before the golfer). The sun's visibility
+    // test, no colour at all, ends the 3D of every frame: the ball's spin picture next wipes depth under it
+    uint32_t mask = SimpleState(s, kMColorWriteEnable);
+    bool rgb = (mask & 0x10101) == 0x10101, none = (mask & 0x1010101) == 0;
+    if (writes || !(none || (func == kAlways && rgb)) || s.rt.data != scene_rt_.data) return;
+    RunScenePass();
+}
+
+void D3D12Backend::RunScenePass() {
+    constexpr float kColor[3] = {0.62f, 0.69f, 0.73f};
+    if (scene_done_ == frame_ || scene_frame_ != frame_ || scene_draws_ < kSceneMinDraws) return;
+    Target* rt = FindTarget(scene_rt_, false);
+    Target* ds = FindTarget(scene_zs_, true);
+    if (!rt || !ds || rt->w != ds->w || rt->h != ds->h || rt->gw != guest_w_) return;
+    scene_done_ = frame_;
+    ID3D12Resource* color = Feedback(*rt);
+    if (!color) return;
+    ReadyRes(*ds);
+    Transition(ds->res.Get(), ds->state, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+    Transition(rt->res.Get(), rt->state, D3D12_RESOURCE_STATE_RENDER_TARGET);
+    ResWritten(*rt);
+    int on = g_scene_pass.load();
+    bool occlude = (on & (16 | 32)) && !free_rtv_.empty();
+    if (occlude && ao_ && (ao_->GetDesc().Width != rt->w || ao_->GetDesc().Height != rt->h)) {
+        CurrentFrame().garbage.push_back(ao_);  // the size changed; the GPU may still read the old one
+        ao_.Reset();
+    }
+    if (occlude && !ao_) {
+        D3D12_HEAP_PROPERTIES hp{D3D12_HEAP_TYPE_DEFAULT};
+        D3D12_RESOURCE_DESC td = Texture2DDesc(DXGI_FORMAT_R8_UNORM, rt->w, rt->h);
+        td.Flags = D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
+        D3D12_CLEAR_VALUE cv{};
+        cv.Format = DXGI_FORMAT_R8_UNORM;
+        ao_state_ = D3D12_RESOURCE_STATE_RENDER_TARGET;
+        if (FAILED(dev_->CreateCommittedResource(&hp, D3D12_HEAP_FLAG_NONE, &td, ao_state_, &cv, IID_PPV_ARGS(&ao_)))) occlude = false;
+    }
+    ID3D12Resource* const src[3] = {color, ds->res.Get(), occlude ? ao_.Get() : nullptr};
+    const DXGI_FORMAT fmt[3] = {rt->fmt, DXGI_FORMAT_R24_UNORM_X8_TYPELESS, DXGI_FORMAT_R8_UNORM};
+    const float p[8] = {scene_z_[0], scene_z_[1], g_haze_start.load(), g_haze_range.load(), kColor[0], kColor[1], kColor[2], g_haze_most.load()};
+    const float more[16] = {g_bloom_bright.load(), g_bloom_glow.load(), g_focus_near.load(), g_focus_far.load(), g_focus_blur.load(),
+                            scene_xy_[0], scene_xy_[1], g_ao_strength.load(), float(occlude ? on : on & ~16)};
+    pass_more_ = more;
+    if (occlude) {
+        // borrows the next free view without taking it, only for this recording (as Smaa)
+        D3D12_CPU_DESCRIPTOR_HANDLE rh = Cpu(rtv_heap_.Get(), free_rtv_.back(), rtv_inc_);
+        Transition(ao_.Get(), ao_state_, D3D12_RESOURCE_STATE_RENDER_TARGET);
+        dev_->CreateRenderTargetView(ao_.Get(), nullptr, rh);
+        ID3D12Resource* const in[3] = {nullptr, ds->res.Get(), nullptr};
+        Pass(kScenePass, "ao", DXGI_FORMAT_R8_UNORM, rh, rt->w, rt->h, in, fmt, p, -1);
+        Transition(ao_.Get(), ao_state_, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+    }
+    Pass(kScenePass, on == 8 ? "grey" : on == 32 ? "aoview" : "scene", rt->fmt, View(*rt), rt->w, rt->h, src, fmt, p, -1);
+    pass_more_ = nullptr;
+    dyn_.Invalidate();
+    rep_.ok = false;
 }
 
 // a copy of the target to read while drawing to it
@@ -3824,6 +4060,7 @@ void D3D12Backend::Draw(const State& s, uint32_t prim, uint32_t start, uint32_t 
     g_perf.d_obs += ms(tp, t_obs);
     if (cap_ || ext_) FlushBatch();  // (a capture or an extension records between draws)
     if (cap_) CapStep(s.rt);
+    if (g_scene_pass.load(std::memory_order_relaxed)) ScenePass(s);
     if (DepthCopy(s)) return;
     g_perf.d_early += ms(t_obs, DrawClock::now());
     DrawEnd draw_end{ext_};
@@ -4605,7 +4842,8 @@ void D3D12Backend::BlitFrame(Target& t, D3D12_CPU_DESCRIPTOR_HANDLE rh) {
     // sharpening on the frame as shown: [graphics] sharpening, 0 the original picture
     float sharpen = g_sharpen_off ? 0.0f : std::min(app::Get().sharpening, 100u) / 100.0f;
     Blit(src, fmt, uv,
-         {.gamma = gamma_, .rtv = bb_fmt_, .sharpen = sharpen, .texel = {texel[0], texel[1]}, .hdr = hdr_, .look = true});
+         {.gamma = gamma_, .rtv = bb_fmt_, .sharpen = sharpen, .texel = {texel[0], texel[1]}, .hdr = hdr_, .look = true,
+          .blur = app::g_backdrop_blur.load() * float(bb_h_) / 60.0f});
     if (show_motion) {
         auto it = motion_.find(t.data);
         if (it != motion_.end() && it->second.res) {
@@ -5032,6 +5270,7 @@ void D3D12Backend::Present(const Surface& front) {
     g_wait_display = WaitDisplayBlank;
     FlushBatch();
     PerfScope perf_present{g_perf.present};
+    if (g_scene_pass.load(std::memory_order_relaxed)) RunScenePass();
     if (cap_) {
         FinishCapture(front);
     } else if (CaptureOn() && (g_capture.exchange(false) || AutoCaptureDue())) {

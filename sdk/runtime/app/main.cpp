@@ -312,7 +312,10 @@ std::recursive_mutex& UiLock() {
     return m;
 }
 
-void ApplyDisplay() { PostMessageW(g_hwnd, kApplyDisplay, 0, 0); }
+void ApplyDisplay() {
+    PostMessageW(g_hwnd, kApplyDisplay, 0, 0);
+    gpu::g_display_changed = true;
+}
 void OpenGameWindow(bool apply) { SendMessageW(g_hwnd, kOpenWindow, apply, 0); }
 
 void Pace() {

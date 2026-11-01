@@ -308,3 +308,7 @@ call = "TW_MovieDrawn"
 [[hook]]                   # movie loop: no new picture yet, polling for the decoder's next one
 at = 0x000F9598
 call = "TW_MovieIdle"
+
+[[hook]]                   # camera flight's trail: the rectangle of the last frame it reads, the whole frame like the viewport
+at = 0x0007415A
+call = "TW_TrailSource"
