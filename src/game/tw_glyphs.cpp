@@ -2,18 +2,28 @@
 // textures the game loaded, known by their pictures: 64 x 64 sheets of four, each button drawn over in its own place.
 #include <algorithm>
 #include <atomic>
+#include <cctype>
 #include <cmath>
 #include <cstdint>
+#include <cstdlib>
+#include <string>
 #include <vector>
 
 #include "app/app.h"
 #include "core/input.h"
+#include "core/keys.h"
 #include "gpu/texture_pack.h"
+
+#define STB_TRUETYPE_IMPLEMENTATION
+#define STBTT_STATIC
+#include "imstb_truetype.h"
+
+const unsigned char* TW_TitleFont();  // tw_menu.cpp
 
 namespace {
 
 constexpr uint32_t kSize = 64, kBigger = 4;
-constexpr int kStylePlayStation = 1;
+constexpr int kStylePlayStation = 1, kStyleKeyboard = 3;
 constexpr float kRoot = 0.70710678f;
 
 enum class Button { A, B, X, Y, Black };
@@ -147,6 +157,93 @@ void Draw(uint8_t* out, uint32_t W, const Place& at, Button b, bool playstation)
         }
 }
 
+// a bound key's name as it goes on a keycap
+std::string CapText(const std::string& key) {
+    static const std::pair<const char*, const char*> kShort[] = {{"Backspace", "BKSP"}, {"LShift", "SHIFT"}, {"RShift", "SHIFT"}, {"LCtrl", "CTRL"},
+                                                                 {"RCtrl", "CTRL"},     {"LAlt", "ALT"},     {"RAlt", "ALT"},     {"Grave", "`"}};
+    for (const auto& [name, text] : kShort)
+        if (key == name) return text;
+    std::string out = key;
+    for (char& c : out) c = char(std::toupper(static_cast<unsigned char>(c)));
+    return out;
+}
+
+// text as coverage, 0 to 1, W x H, fitted within wide and high pixels and centred on x, y
+void TextMask(const std::string& text, float x, float y, float wide, float high, uint32_t W, uint32_t H, std::vector<float>& mask) {
+    stbtt_fontinfo font;
+    const unsigned char* data = TW_TitleFont();
+    if (!stbtt_InitFont(&font, data, stbtt_GetFontOffsetForIndex(data, 0))) return;
+    float scale = stbtt_ScaleForPixelHeight(&font, high);
+    int ascent, descent, gap;
+    stbtt_GetFontVMetrics(&font, &ascent, &descent, &gap);
+    auto span = [&](float k) {
+        float at = 0;
+        for (char c : text) {
+            int advance, bearing;
+            stbtt_GetCodepointHMetrics(&font, c, &advance, &bearing);
+            at += float(advance) * k;
+        }
+        return at;
+    };
+    float across = span(scale);
+    if (across > wide) scale *= wide / across, across = wide;
+    int x0, y0, x1, y1;
+    stbtt_GetCodepointBitmapBox(&font, 'H', scale, scale, &x0, &y0, &x1, &y1);
+    float pen = x - across / 2, base = y + float(y1 - y0) / 2;
+    for (char c : text) {
+        int w, h, ox, oy, advance, bearing;
+        stbtt_GetCodepointHMetrics(&font, c, &advance, &bearing);
+        if (unsigned char* bitmap = stbtt_GetCodepointBitmap(&font, scale, scale, c, &w, &h, &ox, &oy)) {
+            for (int j = 0; j < h; j++)
+                for (int i = 0; i < w; i++) {
+                    int px = int(pen) + ox + i, py = int(base) + oy + j;
+                    if (px >= 0 && py >= 0 && px < int(W) && py < int(H))
+                        mask[size_t(py) * W + size_t(px)] = std::max(mask[size_t(py) * W + size_t(px)], bitmap[j * w + i] / 255.0f);
+                }
+            stbtt_FreeBitmap(bitmap, nullptr);
+        }
+        pen += float(advance) * scale;
+    }
+}
+
+// a key: a light cap with its name; a mouse button: the mouse with that button lit
+void DrawKey(uint8_t* out, uint32_t W, const Place& at, keys::Action action) {
+    constexpr float kEdge = 2.5f;
+    constexpr Colour kCap{232, 234, 240}, kSide{120, 124, 136}, kInk{28, 30, 36}, kLit{236, 124, 32}, kBody{220, 222, 230};
+    std::string key = keys::FirstKey(action);
+    int button = key == "Mouse1" ? 1 : key == "Mouse2" ? 2 : key == "Mouse3" ? 3 : 0;
+    int x0 = std::max(int((at.x - at.wide - kEdge) * kBigger), 0), x1 = std::min(int((at.x + at.wide + kEdge) * kBigger), int(W));
+    int y0 = std::max(int((at.y - at.high - kEdge) * kBigger), 0), y1 = std::min(int((at.y + at.high + kEdge) * kBigger), int(W));
+    float tall = at.high / at.wide, r = at.wide;
+    std::vector<float> mask(size_t(W) * W);
+    if (!button) TextMask(CapText(key), at.x * kBigger, at.y * kBigger, (r * 1.55f) * kBigger, (r * 0.9f) * kBigger, W, W, mask);
+    auto box = [](float x, float y, float half_w, float half_h, float round) {
+        float dx = std::fabs(x) - half_w + round, dy = std::fabs(y) - half_h + round;
+        return std::hypot(std::max(dx, 0.0f), std::max(dy, 0.0f)) + std::min(std::max(dx, dy), 0.0f) - round;
+    };
+    for (int y = y0; y < y1; y++)
+        for (int x = x0; x < x1; x++) {
+            uint8_t* p = out + (size_t(y) * W + size_t(x)) * 4;
+            p[0] = p[1] = p[2] = p[3] = 0;
+            float tx = (float(x) + 0.5f) / kBigger - at.x, ty = ((float(y) + 0.5f) / kBigger - at.y) / tall;
+            if (button) {
+                float body = box(tx, ty, r * 0.68f, r * 0.96f, r * 0.62f);
+                Over(p, kSide, Cover(body - 0.5f));
+                Over(p, kBody, Cover(body + 0.4f));
+                bool top = ty < -r * 0.1f;
+                bool lit = top && (button == 1 ? tx < 0 : button == 2 ? tx > 0 : false);
+                if (lit) Over(p, kLit, Cover(body + 0.4f));
+                if (top) Over(p, kInk, Cover(std::fabs(tx) - 0.3f));
+                Over(p, kInk, Cover(std::fabs(ty + r * 0.1f) - 0.3f) * Cover(body + 0.4f));
+                if (button == 3) Over(p, kLit, Cover(box(tx, ty + r * 0.48f, r * 0.13f, r * 0.26f, r * 0.12f)));
+            } else {
+                Over(p, kSide, Cover(box(tx, ty + 0.5f, r, r * 0.96f, r * 0.22f)));
+                Over(p, kCap, Cover(box(tx, ty, r - 1.0f, r * 0.82f, r * 0.2f)));
+                Over(p, kInk, mask[size_t(y) * W + size_t(x)]);
+            }
+        }
+}
+
 // how much of a quarter of the sheet is drawn, and its average colour
 struct Patch {
     int drawn = 0;
@@ -178,16 +275,21 @@ bool Styled(const std::vector<uint8_t>& rgba, uint32_t w, uint32_t h, int style,
     bool red = ur.drawn > kButton && ur.r > ur.g + kColoured && ur.r > ur.b + kColoured;
     if (!green && !red) return false;
     if (style < 0) return true;
-    bool playstation = style == kStylePlayStation;
+    bool playstation = style == kStylePlayStation, keyboard = style == kStyleKeyboard;
     uint32_t W = w * kBigger, H = h * kBigger;
     std::vector<uint8_t> big(size_t(W) * H * 4);
     for (uint32_t y = 0; y < H; y++)
         for (uint32_t x = 0; x < W; x++)
             std::copy_n(rgba.data() + (size_t(y / kBigger) * w + x / kBigger) * 4, 4, big.data() + (size_t(y) * W + x) * 4);
-    Draw(big.data(), W, kUpperRight, green ? Button::A : Button::B, playstation);
-    if (ul.drawn > kButton) Draw(big.data(), W, kUpperLeft, ul.g > ul.r + kGreenish ? Button::Y : Button::X, playstation);
-    if (ll.drawn > kButton && ll.g > ll.r + kColoured) Draw(big.data(), W, kLowerLeft, Button::A, playstation);  // the A on teal
-    if (lr.drawn > kButton && lr.r < kBlackMost) Draw(big.data(), W, kLowerRight, Button::Black, playstation);
+    auto put = [&](const Place& at, Button b) {
+        static constexpr keys::Action kKeys[] = {keys::kA, keys::kB, keys::kX, keys::kY, keys::kBlack};
+        if (keyboard) DrawKey(big.data(), W, at, kKeys[int(b)]);
+        else Draw(big.data(), W, at, b, playstation);
+    };
+    put(kUpperRight, green ? Button::A : Button::B);
+    if (ul.drawn > kButton) put(kUpperLeft, ul.g > ul.r + kGreenish ? Button::Y : Button::X);
+    if (ll.drawn > kButton && ll.g > ll.r + kColoured) put(kLowerLeft, Button::A);  // the A on teal
+    if (lr.drawn > kButton && lr.r < kBlackMost) put(kLowerRight, Button::Black);
     out = {};
     out.width = W;
     out.height = H;
@@ -199,17 +301,34 @@ bool Styled(const std::vector<uint8_t>& rgba, uint32_t w, uint32_t h, int style,
 
 }  // namespace
 
-uint32_t g_tw_prompts = 0;  // [input] button_prompts: 0 by the controller, 1 Xbox, 2 PlayStation
+uint32_t g_tw_prompts = 0;  // [input] button_prompts: 0 what was last used, 1 Xbox, 2 PlayStation, 3 keyboard and mouse
+static std::atomic<bool> g_on_keys{false};  // the keyboard or mouse was used after the controller
+
+void TW_GlyphsApply();
 
 void TW_GlyphsStart() { gpu::pack::g_styled = Styled; }
 
-void TW_GlyphsApply() {
-    gpu::pack::g_style = g_tw_prompts == 2 ? kStylePlayStation : g_tw_prompts == 1 ? 0 : input::Style(0);
+// a key went to the quick menu, which the keys' read does not see while it is open
+void TW_GlyphsKey() {
+    if (!g_on_keys.exchange(true)) TW_GlyphsApply();
 }
 
-// the controller's kind, looked at now and then: it takes the input lock
-void TW_GlyphsPad(int port) {
-    constexpr int kEvery = 60;
+void TW_GlyphsApply() {
+    int look = g_tw_prompts == 3 ? kStyleKeyboard : g_tw_prompts == 2 ? kStylePlayStation : g_tw_prompts == 1 ? 0 : -1;
+    if (look < 0) look = g_on_keys ? kStyleKeyboard : input::Style(0);
+    gpu::pack::g_style = look;
+}
+
+// each read of pad 1, before the keys join it: what was last used. The controller's kind only now and then, as it
+// takes the input lock
+void TW_GlyphsPad(int port, const input::Pad& pad) {
+    constexpr int kEvery = 60, kTilt = 14000, kPressed = 30;
     static int count = 0;
-    if (!port && ++count % kEvery == 1) TW_GlyphsApply();
+    if (port) return;
+    bool moved = pad.buttons != 0 || std::abs(pad.lx) > kTilt || std::abs(pad.ly) > kTilt || std::abs(pad.rx) > kTilt || std::abs(pad.ry) > kTilt;
+    for (uint8_t a : pad.analog) moved = moved || a > kPressed;
+    bool was = g_on_keys;
+    if (moved) g_on_keys = false;
+    else if (keys::g_active) g_on_keys = true;
+    if (was != g_on_keys || ++count % kEvery == 1) TW_GlyphsApply();
 }

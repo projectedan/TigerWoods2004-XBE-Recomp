@@ -60,7 +60,7 @@ extern UpscaleTexture g_upscale;
 // to show it as it is
 using StyledTexture = bool (*)(const std::vector<uint8_t>& rgba, uint32_t w, uint32_t h, int style, Image& out);
 extern StyledTexture g_styled;
-constexpr int kStyles = 3;
+constexpr int kStyles = 4;  // input::Style's, then a game's keyboard look
 constexpr uint32_t kStyledMost = 64;
 extern std::atomic<int> g_style;  // the look to show
 // rgba (w x h, rows packed) redrawn k times larger, sharp: cubic, then an unsharp mask scaled to the new size

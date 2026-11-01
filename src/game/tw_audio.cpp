@@ -15,6 +15,7 @@
 
 void TW_MenuUi();                  // tw_menu.cpp
 bool TW_MenuKey(uintptr_t key);
+void TW_MenuToggle();
 
 namespace {
 std::chrono::steady_clock::time_point g_shown, g_movie_seen;
@@ -23,7 +24,11 @@ const char* g_label = "";
 
 bool TW_Message(void*, uint32_t msg, uintptr_t wp, intptr_t lp, intptr_t*) {
     constexpr uint32_t kKeyDown = 0x100;
-    constexpr uintptr_t kF9 = 0x78;
+    constexpr uintptr_t kF9 = 0x78, kF1 = 0x70;
+    if (msg == kKeyDown && wp == kF1) {
+        if (!(lp & (1 << 30))) TW_MenuToggle();
+        return true;
+    }
     if (msg == kKeyDown && TW_MenuKey(wp)) return true;
     if (msg != kKeyDown || wp != kF9 || (lp & (1 << 30))) return false;
     g_shown = std::chrono::steady_clock::now();

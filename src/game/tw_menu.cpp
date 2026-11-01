@@ -1,4 +1,4 @@
-// The port's options, in the look of the game's own screens: Back and Start together (or F10, or both stick clicks)
+// The port's options, in the look of the game's own screens: Back and Start together (or F1, F10, or both stick clicks)
 // open and close it. The game plays on behind it without the controllers, so what changes shows at once. Drawn by
 // hand with ImGui's draw lists, and steered like the game's menus: up and down a row, left and right its value.
 #ifndef WIN32_LEAN_AND_MEAN
@@ -11,21 +11,30 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cctype>
 #include <cfloat>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 #include <string>
 #include <utility>
 #include <vector>
 
 #include "app/app.h"
 #include "core/input.h"
+#include "core/keys.h"
 #include "core/log.h"
+#include "gpu/texture_pack.h"
 #include "imgui.h"
+
+namespace keys {
+void Swallow();  // keyboard.cpp: keys down now are not read again until released
+}
 
 void TW_ApplyScene();
 void TW_GlyphsApply();
+void TW_GlyphsKey();
 extern uint32_t g_tw_prompts;
 extern bool g_tw_haze, g_tw_bloom, g_tw_focus, g_tw_ao, g_tw_full_detail;
 extern float g_tw_haze_amount, g_tw_bloom_amount;
@@ -54,7 +63,8 @@ struct Row {
     bool* flag = nullptr;
     float* amount = nullptr;
 };
-const std::vector<Row> kPages[2] = {
+constexpr int kPageCount = 3;
+const std::vector<Row> kPages[kPageCount] = {
     {{Kind::Mode, "WINDOW"}, {Kind::Scale, "RESOLUTION SCALING"}, {Kind::Smoothing, "ANTI-ALIASING"}, {Kind::VSync, "V-SYNC"},
      {Kind::Prompts, "BUTTON PROMPTS"}, {Kind::Tick, "FULL DETAIL TREES", &g_tw_full_detail}},
     {{Kind::Tick, "DISTANCE HAZE", &g_tw_haze},
@@ -63,14 +73,16 @@ const std::vector<Row> kPages[2] = {
      {Kind::Amount, "INTENSITY", nullptr, &g_tw_bloom_amount},
      {Kind::Tick, "DEPTH OF FIELD", &g_tw_focus},
      {Kind::Tick, "AMBIENT OCCLUSION", &g_tw_ao}},
+    {},  // the controls, to read (DrawControls)
 };
-const char* const kPageNames[2] = {"DISPLAY", "EFFECTS"};
+const char* const kPageNames[kPageCount] = {"DISPLAY", "EFFECTS", "CONTROLS"};
+constexpr int kControlsPage = 2;
 const char* const kModeNames[3] = {"FULLSCREEN", "BORDERLESS", "WINDOWED"};
 // the frame's size: the console's, the screen's, multiples of the screen's. Taken with A, as each step remakes the targets
 const char* const kScaleNames[4] = {"CLASSIC", "DESKTOP", "2X", "3X"};
 constexpr uint32_t kScalePercent[4] = {100, 100, 200, 300};
 const char* const kSmoothingNames[3] = {"OFF", "SMAA", "MSAA 2X"};
-const char* const kPromptNames[3] = {"AUTO", "XBOX", "PLAYSTATION"};
+const char* const kPromptNames[4] = {"AUTO", "XBOX", "PLAYSTATION", "KEYBOARD"};
 
 // the game's look
 constexpr ImU32 kOrange = IM_COL32(236, 124, 32, 255), kOrangeLit = IM_COL32(255, 170, 70, 255), kWhite = IM_COL32(255, 255, 255, 255),
@@ -102,6 +114,7 @@ int SmoothingNow() {
 void Close() {
     if (!g_open.exchange(false)) return;
     g_swallow = true;
+    keys::Swallow();  // Esc closing the menu is not also the game's pause
     g.pending_on = g.leaving = false;
     if (g.dirty) {
         app::Save();
@@ -163,7 +176,7 @@ void Change(const Row& r, int step, bool confirm) {
         case Kind::VSync: s.vsync = !s.vsync; break;
         case Kind::Prompts:
             if (confirm) return;
-            g_tw_prompts = (g_tw_prompts + 3 + step) % 3;
+            g_tw_prompts = (g_tw_prompts + 4 + step) % 4;
             TW_GlyphsApply();
             break;
         case Kind::Tick:
@@ -201,7 +214,7 @@ void Input() {
         return;
     }
     if (pressed & (kPrev | kNext)) {
-        g.page = g.page ^ 1;
+        g.page = (g.page + ((pressed & kNext) ? 1 : kPageCount - 1)) % kPageCount;
         g.row = 0;
         g.pending_on = g.leaving = false;
     }
@@ -287,6 +300,260 @@ void Bar(ImDrawList* dl, float u, float x, float y, float w, float amount, bool 
     dl->AddRectFilled(ImVec2(knob - 2.5f * u, y - 3 * u), ImVec2(knob + 2.5f * u, y + h + 3 * u), selected ? kWhite : kGrey);
 }
 
+// a key's name as the diagram labels it
+std::string KeyWords(const std::string& key) {
+    if (key == "Mouse1") return "LEFT CLICK";
+    if (key == "Mouse2") return "RIGHT CLICK";
+    if (key == "Mouse3") return "MIDDLE CLICK";
+    if (key == "LShift" || key == "RShift") return "SHIFT";
+    if (key == "Grave") return "~ KEY";
+    if (key.empty()) return "NOT SET";
+    std::string out = key;
+    for (char& c : out) c = char(std::toupper(static_cast<unsigned char>(c)));
+    return out;
+}
+
+// a pad's outline, right half, top middle to bottom middle: x, y from the pad's middle in the units of DrawPad. Runs of
+// three points are Bezier curves from the point before. Proportions after TheHoodieGuy02's "8th Gen Console Vector
+// Gamepad Collection" (OpenGameArt, CC0)
+constexpr ImVec2 kOutlineStart{0, -66};
+constexpr ImVec2 kOutline[][3] = {{{14, -68}, {28, -71}, {40, -72}},   {{50, -76}, {60, -76}, {68, -74}},  {{84, -72}, {96, -62}, {100, -50}},
+                                  {{105, -35}, {110, -15}, {113, 5}},  {{116, 25}, {118, 45}, {117, 58}},  {{116, 75}, {108, 86}, {96, 87}},
+                                  {{86, 88}, {80, 78}, {72, 68}},      {{66, 60}, {60, 48}, {54, 40}},     {{36, 38}, {18, 38}, {0, 38}}};
+
+void PadOutline(std::vector<ImVec2>& out, ImVec2 mid, float k) {
+    constexpr int kSteps = 12;
+    std::vector<ImVec2> half;
+    ImVec2 from = kOutlineStart;
+    half.push_back(from);
+    for (const auto& c : kOutline) {
+        for (int i = 1; i <= kSteps; i++) {
+            float t = float(i) / kSteps, m = 1 - t;
+            float w0 = m * m * m, w1 = 3 * m * m * t, w2 = 3 * m * t * t, w3 = t * t * t;
+            half.push_back(ImVec2(w0 * from.x + w1 * c[0].x + w2 * c[1].x + w3 * c[2].x, w0 * from.y + w1 * c[0].y + w2 * c[1].y + w3 * c[2].y));
+        }
+        from = c[2];
+    }
+    out.clear();
+    for (const ImVec2& v : half) out.push_back(ImVec2(mid.x + v.x * k, mid.y + v.y * k));
+    for (size_t i = half.size(); i-- > 0;) out.push_back(ImVec2(mid.x - half[i].x * k, mid.y + half[i].y * k));
+}
+
+// a shape that is not convex, a row of pixels at a time
+void FillOutline(ImDrawList* dl, const std::vector<ImVec2>& line, float step, ImU32 col) {
+    float low = FLT_MAX, high = -FLT_MAX;
+    for (const ImVec2& v : line) low = std::min(low, v.y), high = std::max(high, v.y);
+    std::vector<float> at;
+    for (float y = low; y < high; y += step) {
+        at.clear();
+        for (size_t i = 0; i < line.size(); i++) {
+            const ImVec2& a = line[i];
+            const ImVec2& b = line[(i + 1) % line.size()];
+            if ((a.y <= y) != (b.y <= y)) at.push_back(a.x + (y - a.y) / (b.y - a.y) * (b.x - a.x));
+        }
+        std::sort(at.begin(), at.end());
+        for (size_t i = 0; i + 1 < at.size(); i += 2) dl->AddRectFilled(ImVec2(at[i], y), ImVec2(at[i + 1], y + step), col);
+    }
+}
+
+// the pad, its face buttons in the look in use; the words are the game's loading screen's. Each line's place is chosen
+// so that none crosses another: over the pad by order along it, beside it by order down it
+void DrawPad(ImDrawList* dl, float u, float cx, float top, bool ps) {
+    constexpr ImU32 kBody = IM_COL32(44, 46, 54, 255), kEdge = IM_COL32(150, 154, 168, 255), kPart = IM_COL32(24, 25, 31, 255), kBack = IM_COL32(32, 33, 40, 255);
+    constexpr float kScale = 0.8f, kMiddle = 118;
+    ImVec2 mid(cx, top + kMiddle * u);
+    auto at = [&](float x, float y) { return ImVec2(mid.x + x * kScale * u, mid.y + y * kScale * u); };
+    // the triggers and the shoulder buttons behind the body
+    for (float side : {-1.0f, 1.0f}) {
+        ImVec2 t0 = at(side * 46, -92), t1 = at(side * 76, -74), b0 = at(side * 32, -84), b1 = at(side * 88, -64);
+        dl->AddRectFilled(ImVec2(std::min(t0.x, t1.x), t0.y), ImVec2(std::max(t0.x, t1.x), t1.y), kBack, 5 * u);
+        dl->AddRect(ImVec2(std::min(t0.x, t1.x), t0.y), ImVec2(std::max(t0.x, t1.x), t1.y), kEdge, 5 * u, 0, 1.1f * u);
+        dl->AddRectFilled(ImVec2(std::min(b0.x, b1.x), b0.y), ImVec2(std::max(b0.x, b1.x), b1.y), kBack, 6 * u);
+        dl->AddRect(ImVec2(std::min(b0.x, b1.x), b0.y), ImVec2(std::max(b0.x, b1.x), b1.y), kEdge, 6 * u, 0, 1.1f * u);
+    }
+    std::vector<ImVec2> line;
+    PadOutline(line, mid, kScale * u);
+    FillOutline(dl, line, 0.5f, kBody);
+    dl->AddPolyline(line.data(), int(line.size()), kEdge, ImDrawFlags_Closed, 1.3f * u);
+    Text(dl, 8 * u, cx - 48 * u, mid.y - 64 * u, kWhite, ps ? "L1" : "LB", 0.5f);
+    Text(dl, 8 * u, cx + 48 * u, mid.y - 64 * u, kWhite, ps ? "R1" : "RB", 0.5f);
+    auto stick = [&](ImVec2 c) {
+        dl->AddCircleFilled(c, 13 * u, kPart, 32);
+        dl->AddCircle(c, 13 * u, kEdge, 32, 1.1f * u);
+        dl->AddCircleFilled(c, 9 * u, kBack, 28);
+        dl->AddCircle(c, 9 * u, kEdge, 28, 1.0f * u);
+    };
+    ImVec2 left_stick = at(-58, -39), right_stick = at(29, 6), pad = at(-30, 5), view = at(-16, -40), menu = at(17, -40);
+    stick(left_stick);
+    stick(right_stick);
+    float arm = 13 * u, wide = 4.6f * u;
+    dl->AddRectFilled(ImVec2(pad.x - arm, pad.y - wide), ImVec2(pad.x + arm, pad.y + wide), kPart, 1.2f * u);
+    dl->AddRectFilled(ImVec2(pad.x - wide, pad.y - arm), ImVec2(pad.x + wide, pad.y + arm), kPart, 1.2f * u);
+    for (const ImVec2& c : {view, menu}) {
+        dl->AddCircleFilled(c, 4 * u, kPart, 16);
+        dl->AddCircle(c, 4 * u, kEdge, 16, 1.0f * u);
+    }
+    struct Face {
+        float x, y;
+        ImU32 box, mark;
+        const char* letter;
+    };
+    constexpr ImU32 kPsFace = IM_COL32(24, 25, 31, 255);
+    const Face faces[4] = {{60, -23, ps ? kPsFace : IM_COL32(62, 168, 58, 255), IM_COL32(132, 178, 240, 255), "A"},
+                           {76, -39, ps ? kPsFace : IM_COL32(206, 48, 44, 255), IM_COL32(238, 92, 92, 255), "B"},
+                           {43, -39, ps ? kPsFace : IM_COL32(46, 104, 206, 255), IM_COL32(226, 134, 190, 255), "X"},
+                           {60, -55, ps ? kPsFace : IM_COL32(226, 180, 34, 255), IM_COL32(80, 206, 164, 255), "Y"}};
+    for (int i = 0; i < 4; i++) {
+        const Face& f = faces[i];
+        ImVec2 c = at(f.x, f.y);
+        float r = 6.6f * u, m = 3 * u;
+        dl->AddCircleFilled(c, r, f.box, 20);
+        if (!ps) {
+            Text(dl, 8 * u, c.x, c.y - 4.2f * u, kWhite, f.letter, 0.5f);
+        } else if (i == 0) {
+            dl->AddLine(ImVec2(c.x - m, c.y - m), ImVec2(c.x + m, c.y + m), f.mark, 1.2f * u);
+            dl->AddLine(ImVec2(c.x + m, c.y - m), ImVec2(c.x - m, c.y + m), f.mark, 1.2f * u);
+        } else if (i == 1) {
+            dl->AddCircle(c, m, f.mark, 14, 1.2f * u);
+        } else if (i == 2) {
+            dl->AddRect(ImVec2(c.x - m, c.y - m), ImVec2(c.x + m, c.y + m), f.mark, 0, 0, 1.2f * u);
+        } else {
+            dl->AddTriangle(ImVec2(c.x, c.y - m - u), ImVec2(c.x + m, c.y + m - u), ImVec2(c.x - m, c.y + m - u), f.mark, 1.2f * u);
+        }
+    }
+    auto words = [&](float x, float y, float align, const char* first, const char* second, ImVec2 to) {
+        constexpr ImU32 kLine = IM_COL32(214, 218, 228, 210);
+        float lx = cx + x * u, ly = top + y * u;
+        Text(dl, 10 * u, lx, ly, kWhite, first, align);
+        if (second) Text(dl, 10 * u, lx, ly + 10 * u, kWhite, second, align);
+        ImVec2 from = align == 0.5f ? ImVec2(lx, ly + (second ? 22 : 12) * u) : ImVec2(lx + (align == 1 ? 4 : -4) * u, ly + (second ? 10 : 6) * u);
+        dl->AddLine(from, to, kLine, 1.1f * u);
+        dl->AddCircleFilled(to, 1.8f * u, kWhite, 10);
+    };
+    words(-96, 2, 0.5f, "SWITCH CLUBS", "(TRIGGERS)", at(-60, -84));
+    words(-26, 2, 0.5f, "REVIEW HOLE", "FLY-BY", view);
+    words(42, 2, 0.5f, "PAUSE", nullptr, menu);
+    words(-109, 34, 1, "POWER BOOST", nullptr, at(-68, -74));
+    words(-109, 98, 1, "SWING CLUB /", "SPIN DIRECTION", left_stick);
+    words(-109, 170, 1, "MOVE AIMING", "MARKER", pad);
+    words(109, 30, 0, "SPIN CONTROL", nullptr, at(68, -74));
+    words(109, 50, 0, "RESET TARGETING", "MARK", at(60, -55));
+    words(109, 80, 0, "CHANGE SHOT TYPE /", "REPLAY SHOT", at(43, -39));
+    words(109, 110, 0, "ZOOM TO TARGET /", "MULLIGAN", at(76, -39));
+    words(109, 140, 0, "CHANGE CAMERA", "VIEW", at(60, -23));
+    words(109, 170, 0, "SWING CLUB /", "SPIN DIRECTION", right_stick);
+}
+
+// where a key sits on the drawn keyboard, in key widths
+struct KeySpot {
+    float x, y, w;
+};
+bool FindKey(const std::string& name, KeySpot& out) {
+    static const struct {
+        const char* name;
+        KeySpot at;
+    } kNamed[] = {{"Esc", {0, 0, 1}},       {"F1", {2, 0, 1}},       {"Grave", {0, 1, 1}},  {"Backspace", {13, 1, 2}}, {"Tab", {0, 2, 1.5f}},
+                  {"Enter", {12.75f, 3, 2.25f}}, {"LShift", {0, 4, 2.25f}}, {"RShift", {12.25f, 4, 0.75f}}, {"LCtrl", {0, 5, 1.5f}}, {"Space", {3.75f, 5, 6.25f}},
+                  {"Up", {13, 4, 1}},       {"Left", {12, 5, 1}},    {"Down", {13, 5, 1}},  {"Right", {14, 5, 1}}};
+    for (const auto& k : kNamed)
+        if (name == k.name) return out = k.at, true;
+    static const struct {
+        const char* keys;
+        float x, y;
+    } kRows[] = {{"1234567890", 1, 1}, {"QWERTYUIOP", 1.5f, 2}, {"ASDFGHJKL", 1.75f, 3}, {"ZXCVBNM", 2.25f, 4}};
+    if (name.size() == 1)
+        for (const auto& r : kRows)
+            if (const char* c = std::strchr(r.keys, name[0])) return out = {r.x + float(c - r.keys), r.y, 1}, true;
+    return false;
+}
+
+void DrawKeyboard(ImDrawList* dl, float u, float cx, float top) {
+    constexpr ImU32 kBody = IM_COL32(26, 28, 36, 255), kEdge = IM_COL32(120, 124, 140, 255), kPart = IM_COL32(58, 60, 72, 255);
+    constexpr float kKey = 10, kGap = 0.9f;
+    float x0 = cx - 75 * u, y0 = top + 46 * u, wide = 15 * kKey * u, high = 6 * kKey * u;
+    dl->AddRectFilled(ImVec2(x0 - 4 * u, y0 - 4 * u), ImVec2(x0 + wide + 4 * u, y0 + high + 4 * u), kBody, 4 * u);
+    dl->AddRect(ImVec2(x0 - 4 * u, y0 - 4 * u), ImVec2(x0 + wide + 4 * u, y0 + high + 4 * u), kEdge, 4 * u, 0, 1.1f * u);
+    auto cap = [&](const KeySpot& k, ImU32 col) {
+        dl->AddRectFilled(ImVec2(x0 + k.x * kKey * u + kGap * u, y0 + k.y * kKey * u + kGap * u),
+                          ImVec2(x0 + (k.x + k.w) * kKey * u - kGap * u, y0 + (k.y + 1) * kKey * u - kGap * u), col, 1.5f * u);
+    };
+    static const KeySpot kPlain[] = {{0, 0, 1},     {2, 0, 1},   {3, 0, 1},   {4, 0, 1},   {5, 0, 1},   {7, 0, 1},   {8, 0, 1},   {9, 0, 1},    {10, 0, 1},    {12, 0, 1},   {13, 0, 1},
+                                     {14, 0, 1},    {0, 1, 13},  {13, 1, 2},  {0, 2, 1.5f}, {1.5f, 2, 13}, {14.5f, 2, 0.5f}, {0, 3, 1.75f}, {1.75f, 3, 11}, {12.75f, 3, 2.25f},
+                                     {0, 4, 2.25f}, {2.25f, 4, 10}, {13, 4, 1}, {0, 5, 1.5f}, {1.5f, 5, 2.25f}, {3.75f, 5, 6.25f}, {10, 5, 2}, {12, 5, 1},  {13, 5, 1},   {14, 5, 1}};
+    for (const KeySpot& k : kPlain) {
+        if (k.w < 3) {
+            cap(k, kPart);
+        } else if (k.w == 6.25f) {
+            cap(k, kPart);
+        } else {
+            for (float i = 0; i < k.w; i += 1) cap({k.x + i, k.y, 1}, kPart);
+        }
+    }
+    auto point = [&](const KeySpot& k) { return ImVec2(x0 + (k.x + k.w / 2) * kKey * u, y0 + (k.y + 0.5f) * kKey * u); };
+    // words at x, y (align 0 from it, 1 to it, 0.5 about it), their line to a point: each place is chosen so that no two
+    // lines cross and none crosses the mouse, taking the bindings' keys where the defaults put them
+    auto words = [&](float x, float y, float align, const std::string& key, const char* first, const char* second, ImVec2 to) {
+        constexpr ImU32 kLine = IM_COL32(214, 218, 228, 210);
+        float lx = cx + x * u, ly = top + y * u;
+        Text(dl, 11 * u, lx, ly, kOrangeLit, key.c_str(), align);
+        Text(dl, 10 * u, lx, ly + 10.5f * u, kWhite, first, align);
+        if (second) Text(dl, 10 * u, lx, ly + 20.5f * u, kWhite, second, align);
+        if (to.x == 0) return;
+        ImVec2 from = align == 0.5f ? ImVec2(lx, ly + (second ? 32 : 22) * u) : ImVec2(lx + (align == 1 ? 4 : -4) * u, ly + 10 * u);
+        dl->AddLine(from, to, kLine, 1.1f * u);
+        dl->AddCircleFilled(to, 1.8f * u, kWhite, 10);
+    };
+    auto bound = [&](keys::Action a) {
+        KeySpot k;
+        std::string key = keys::FirstKey(a);
+        if (!FindKey(key, k)) return ImVec2(0, 0);
+        cap(k, kOrange);
+        return point(k);
+    };
+    // over the keyboard, by the keys' order along it
+    KeySpot f1{2, 0, 1};
+    cap(f1, kOrange);
+    words(-80, 0, 0.5f, KeyWords(keys::FirstKey(keys::kX)), "CHANGE SHOT TYPE /", "REPLAY SHOT", bound(keys::kX));
+    words(10, 0, 0.5f, "F1", "QUICK MENU", nullptr, point(f1));
+    words(90, 0, 0.5f, KeyWords(keys::FirstKey(keys::kBlack)), "SPIN CONTROL", nullptr, bound(keys::kBlack));
+    // beside it, by the keys' order down it
+    words(-109, 36, 1, KeyWords(keys::FirstKey(keys::kStart)), "PAUSE", nullptr, bound(keys::kStart));
+    words(-109, 61, 1, KeyWords(keys::FirstKey(keys::kBack)), "REVIEW HOLE FLY-BY", nullptr, bound(keys::kBack));
+    words(-109, 86, 1, KeyWords(keys::FirstKey(keys::kWhite)), "POWER BOOST", nullptr, bound(keys::kWhite));
+    words(-109, 111, 1, KeyWords(keys::FirstKey(keys::kLeftTrigger)), "SWITCH CLUBS", nullptr, bound(keys::kLeftTrigger));
+    words(109, 36, 0, KeyWords(keys::FirstKey(keys::kB)), "ZOOM TO TARGET /", "MULLIGAN", bound(keys::kB));
+    words(109, 78.5f, 0, KeyWords(keys::FirstKey(keys::kA)), "CHANGE CAMERA VIEW", nullptr, bound(keys::kA));
+    KeySpot arrows{14, 5, 1};
+    cap({13, 4, 1}, kOrange), cap({12, 5, 1}, kOrange), cap({13, 5, 1}, kOrange), cap(arrows, kOrange);
+    words(109, 111, 0, "ARROWS", "MOVE AIMING MARKER", nullptr, point(arrows));
+
+    // under it the mouse, its buttons lit, and the swing's two strokes on either side
+    float mx = cx, my = top + 172 * u, mw = 15 * u, mh = 26 * u, split = my - 8 * u, round = 15 * u;
+    dl->AddRectFilled(ImVec2(mx - mw, my - mh), ImVec2(mx + mw, my + mh), kBody, round);
+    dl->AddRectFilled(ImVec2(mx - mw, my - mh), ImVec2(mx, split), kOrange, round, ImDrawFlags_RoundCornersTopLeft);
+    dl->AddRectFilled(ImVec2(mx, my - mh), ImVec2(mx + mw, split), kOrange, round, ImDrawFlags_RoundCornersTopRight);
+    dl->AddRect(ImVec2(mx - mw, my - mh), ImVec2(mx + mw, my + mh), kEdge, round, 0, 1.1f * u);
+    dl->AddLine(ImVec2(mx, my - mh), ImVec2(mx, split), kBody, 1.4f * u);
+    dl->AddLine(ImVec2(mx - mw, split), ImVec2(mx + mw, split), kBody, 1.4f * u);
+    words(-56, 142, 1, "LEFT CLICK", "SWING CLUB (HOLD)", nullptr, ImVec2(mx - mw / 2, my - mh / 2 - 4 * u));
+    words(56, 142, 0, KeyWords(keys::FirstKey(keys::kY)), "RESET TARGETING MARK", nullptr, ImVec2(mx + mw / 2, my - mh / 2 - 4 * u));
+    auto stroke = [&](float x, float dir) {  // an arrow up (-1) or down (1) beside the mouse
+        float px = cx + x * u, y = my + 6 * u, half = 12 * u, head = 6 * u;
+        dl->AddLine(ImVec2(px, y - dir * half), ImVec2(px, y + dir * (half - head)), kOrangeLit, 2.4f * u);
+        dl->AddTriangleFilled(ImVec2(px, y + dir * (half + 3 * u)), ImVec2(px - head, y + dir * (half - head)), ImVec2(px + head, y + dir * (half - head)), kOrangeLit);
+    };
+    stroke(-36, 1);
+    stroke(36, -1);
+    words(-56, 170, 1, "DRAG DOWN", "BACKSWING", nullptr, ImVec2(0, 0));
+    words(56, 170, 0, "DRAG UP", "DOWNSWING", nullptr, ImVec2(0, 0));
+}
+
+void DrawControls(ImDrawList* dl, float u, float cx, float top) {
+    int look = gpu::pack::g_style.load();
+    if (look == 3) DrawKeyboard(dl, u, cx, top);
+    else DrawPad(dl, u, cx, top, look == 1);
+}
+
 void Draw() {
     ImDrawList* dl = ImGui::GetForegroundDrawList();
     ImVec2 size = ImGui::GetIO().DisplaySize;
@@ -318,8 +585,8 @@ void Draw() {
     Arrow(dl, u, cx - side, mid, -1);
     Arrow(dl, u, cx + side, mid, 1);
     Text(dl, 17 * u, cx, mid - 10 * u, kWhite, kPageNames[g.page], 0.5f);
-    Text(dl, 13 * u, cx - side * 0.62f, mid - 7.5f * u, kDim, kPageNames[g.page ^ 1], 0.5f);
-    Text(dl, 13 * u, cx + side * 0.62f, mid - 7.5f * u, kDim, kPageNames[g.page ^ 1], 0.5f);
+    Text(dl, 13 * u, cx - side * 0.62f, mid - 7.5f * u, kDim, kPageNames[(g.page + kPageCount - 1) % kPageCount], 0.5f);
+    Text(dl, 13 * u, cx + side * 0.62f, mid - 7.5f * u, kDim, kPageNames[(g.page + 1) % kPageCount], 0.5f);
 
     // the panel: the game's slate over its green and purple
     const auto& rows = kPages[g.page];
@@ -348,7 +615,7 @@ void Draw() {
                 break;
             }
             case Kind::Smoothing: Text(dl, 16 * u, value, ty, val, kSmoothingNames[SmoothingNow()]); break;
-            case Kind::Prompts: Text(dl, 16 * u, value, ty, val, kPromptNames[g_tw_prompts % 3]); break;
+            case Kind::Prompts: Text(dl, 16 * u, value, ty, val, kPromptNames[g_tw_prompts % 4]); break;
             case Kind::VSync: Tick(dl, u, value, ty + 1 * u, s.vsync, sel); break;
             case Kind::Tick: Tick(dl, u, value, ty + 1 * u, *r.flag, sel); break;
             case Kind::Amount: {
@@ -366,6 +633,8 @@ void Draw() {
         }
     }
 
+    if (g.page == kControlsPage) DrawControls(dl, u, cx, first);
+
     // Exit Game, in the same place on every page
     bool leave = g.row == int(rows.size());
     float ey = bottom - exit;
@@ -379,14 +648,25 @@ void Draw() {
     // the footer: the game's black strip with its buttons
     float fy = bottom + foot / 2;
     dl->AddRectFilled(ImVec2(left, bottom), ImVec2(right, bottom + foot), IM_COL32(4, 4, 8, 255));
-    Glyph(dl, u, left + 18 * u, fy, IM_COL32(190, 34, 30, 255), "B", "Back");
-    Glyph(dl, u, cx - 40 * u, fy, IM_COL32(40, 150, 50, 255), "A", "Select");
-    Text(dl, 12 * u, right - 12 * u, fy - 6 * u, kWhite, "LB / RB  PAGE", 1);
+    int look = gpu::pack::g_style.load();
+    if (look == 3) {  // the keys as words
+        Text(dl, 12 * u, left + 12 * u, fy - 6 * u, kWhite, "ESC  BACK");
+        Text(dl, 12 * u, cx - 40 * u, fy - 6 * u, kWhite, "ENTER  SELECT");
+        Text(dl, 12 * u, right - 12 * u, fy - 6 * u, kWhite, "Q / E  PAGE", 1);
+    } else {
+        bool ps = look == 1;
+        constexpr ImU32 kDark = IM_COL32(44, 46, 54, 255);
+        Glyph(dl, u, left + 18 * u, fy, ps ? kDark : IM_COL32(190, 34, 30, 255), ps ? "O" : "B", "Back");
+        Glyph(dl, u, cx - 40 * u, fy, ps ? kDark : IM_COL32(40, 150, 50, 255), ps ? "X" : "A", "Select");
+        Text(dl, 12 * u, right - 12 * u, fy - 6 * u, kWhite, ps ? "L1 / R1  PAGE" : "LB / RB  PAGE", 1);
+    }
 }
 
 }  // namespace
 
 // after Open and Close, what the runtime asks
+const unsigned char* TW_TitleFont() { return kTitleFont; }
+
 void TW_MenuFonts() {
     ImGuiIO& io = ImGui::GetIO();
     ImFontConfig fc{};
@@ -417,17 +697,18 @@ bool TW_MenuKey(uintptr_t key) {
     if (!g_open) return false;
     uint32_t bit = 0;
     switch (key) {
-        case VK_UP: bit = kUp; break;
-        case VK_DOWN: bit = kDown; break;
-        case VK_LEFT: bit = kLeft; break;
-        case VK_RIGHT: bit = kRight; break;
+        case VK_UP: case 'W': bit = kUp; break;
+        case VK_DOWN: case 'S': bit = kDown; break;
+        case VK_LEFT: case 'A': bit = kLeft; break;
+        case VK_RIGHT: case 'D': bit = kRight; break;
         case VK_RETURN: case VK_SPACE: bit = kA; break;
-        case VK_ESCAPE: bit = kB; break;
-        case VK_PRIOR: bit = kPrev; break;
-        case VK_NEXT: bit = kNext; break;
+        case VK_ESCAPE: case VK_BACK: bit = kB; break;
+        case 'Q': bit = kPrev; break;
+        case 'E': bit = kNext; break;
         default: return false;
     }
     g_keys |= bit;
+    TW_GlyphsKey();
     return true;
 }
 

@@ -237,6 +237,9 @@ struct GameInfo {
     bool remap_controls = true;
     // [keyboard]: the game's own default keys where they differ from keys::kDefaults ({keys::kBlack, "Tab"})
     std::vector<std::pair<uint32_t, const char*>> key_defaults;
+    // a swing held on the left mouse button: while it is down the mouse moves the left stick as a thumb would, from
+    // the middle, back toward the player for down; let go and the stick is centred (a game's golf swing)
+    bool mouse_swing = false;
     // the in-game menu: the game's settings (options) that take effect while playing, "section.key"; the host's
     // own are listed in overlay.cpp
     std::vector<const char*> live_settings;

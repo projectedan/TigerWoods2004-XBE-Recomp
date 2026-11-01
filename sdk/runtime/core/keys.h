@@ -102,4 +102,5 @@ bool Claims(int port);                   // the keyboard plays on this port
 bool Over();                             // the game window has the focus and the pointer is over its picture
 std::string FirstKey(Action a);          // the first key bound to it ("Mouse1"), empty for none
 extern std::atomic<bool> g_used;         // a key has pressed something since the start
+extern std::atomic<bool> g_active;       // a key or mouse button was pressing something at the last read
 }  // namespace keys

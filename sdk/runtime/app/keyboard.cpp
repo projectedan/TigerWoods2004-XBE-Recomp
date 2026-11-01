@@ -24,6 +24,7 @@
 
 namespace keys {
 
+std::atomic<bool> g_active{false};
 std::atomic<bool> g_used{false};  // a key or mouse button has pressed something since the start
 
 namespace {
@@ -76,6 +77,7 @@ std::atomic<uint64_t> g_latched[4];
 // the mouse since the pad was last read (window thread: Mouse): raw movement in counts, wheel notches
 std::atomic<int32_t> g_mouse_dx{0}, g_mouse_dy{0}, g_wheel{0};
 float g_aim_x = 0, g_aim_y = 0;  // the aim the mouse holds the stick at, easing back when it stops
+float g_swing_x = 0, g_swing_y = 0;  // where the mouse has taken the stick since the swing button went down
 
 bool Down(uint8_t vk, bool mouse_ok) {
     bool mouse = vk <= 0x06 && vk != 0x03;
@@ -149,7 +151,10 @@ void Merge(int port, input::Pad& p) {
     const Bindings& b = Get();
     p.connected = true;  // the game sees a controller on the port, so the keys work without one plugged in
     HWND w = static_cast<HWND>(app::Window());
-    if (!w || GetForegroundWindow() != w || app::OverlayOpen()) return;
+    if (!w || GetForegroundWindow() != w || app::OverlayOpen()) {
+        g_active = false;
+        return;
+    }
     bool mouse_ok = Over();
     bool menus = app::kGame.in_menus && app::kGame.in_menus();
     bool held[kCount] = {};
@@ -166,6 +171,7 @@ void Merge(int port, input::Pad& p) {
                 any = true;
             }
         }
+    bool swing = app::kGame.mouse_swing && !menus && Down(VK_LBUTTON, mouse_ok);
     for (auto& w : g_latched) w = 0;  // read once
     int32_t dx = g_mouse_dx.exchange(0), dy = g_mouse_dy.exchange(0), wheel = g_wheel.exchange(0);
     if (!mouse_ok) dx = dy = wheel = 0;
@@ -191,6 +197,27 @@ void Merge(int port, input::Pad& p) {
     } else {
         g_aim_x = g_aim_y = 0;
     }
+    static bool swinging = false;
+    static int32_t swing_low = 0, swing_high = 0, swing_at = 0;
+    if (swing) {
+        constexpr float kFullCounts = 1200;  // of the mouse, middle to full tilt, at 100%
+        float k = float(s.mouse_sensitivity) / 100.0f / kFullCounts;
+        if (swinging) {  // the press itself is the middle: what moved before it does not count
+            g_swing_x = std::clamp(g_swing_x + float(dx) * k, -1.0f, 1.0f);
+            g_swing_y = std::clamp(g_swing_y - float(dy) * k, -1.0f, 1.0f);
+            swing_at += dy;
+            swing_low = std::min(swing_low, swing_at);
+            swing_high = std::max(swing_high, swing_at);
+        }
+        swinging = true;
+        any = true;
+    } else {
+        if (swinging) LOGR("swing: mouse %d counts back, %d forward", swing_high, -swing_low);
+        swinging = false;
+        swing_low = swing_high = swing_at = 0;
+        g_swing_x = g_swing_y = 0;
+    }
+    g_active = any;
     if (!any) return;
     if (!g_used.exchange(true)) LOGR("keyboard: first key press");
     // in the game's menus Esc (Start's keys) goes back, and Enter (A's) goes on the way those menus take it
@@ -215,6 +242,10 @@ void Merge(int port, input::Pad& p) {
     } else if (ax != 0 || ay != 0) {
         p.lx = int16_t(std::lround(ax * 32767));
         p.ly = int16_t(std::lround(ay * 32767));
+    }
+    if (swing) {
+        p.lx = int16_t(std::lround(g_swing_x * 32767));
+        p.ly = int16_t(std::lround(g_swing_y * 32767));
     }
     // the analog buttons, A B X Y black white left trigger right trigger, as input::Pad::analog
     for (uint32_t i = 0; i < 8; i++)

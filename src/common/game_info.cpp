@@ -1,4 +1,5 @@
 #include "app/app.h"
+#include "core/keys.h"
 
 void TW_Pad(int port, input::Pad& pad);  // src/game/tw_test.cpp
 bool TW_Message(void* hwnd, uint32_t msg, uintptr_t wp, intptr_t lp, intptr_t* result);  // src/game/tw_audio.cpp
@@ -30,7 +31,7 @@ const app::GameInfo app::kGame = {
                 {"effects", "bloom_intensity", cfg::Type::Float, "Bloom intensity", "", nullptr, nullptr, nullptr, 0, 100, {}, nullptr, &g_tw_bloom_amount},
                 {"effects", "depth_of_field", cfg::Type::Bool, "Depth of field", "The far distance softens.", &g_tw_focus},
                 {"effects", "ambient_occlusion", cfg::Type::Bool, "Ambient occlusion", "Soft shade where things meet the ground and each other.", &g_tw_ao},
-                {"input", "button_prompts", cfg::Type::Choice, "Button prompts", "The buttons shown on screen: those of the controller in use, or a set you choose.", nullptr, &g_tw_prompts, nullptr, 0, 0, {"auto", "xbox", "playstation"}, nullptr, nullptr, {"Auto", "Xbox", "PlayStation"}},
+                {"input", "button_prompts", cfg::Type::Choice, "Button prompts", "The buttons shown on screen: those of what you last used, or a set you choose.", nullptr, &g_tw_prompts, nullptr, 0, 0, {"auto", "xbox", "playstation", "keyboard"}, nullptr, nullptr, {"Auto", "Xbox", "PlayStation", "Keyboard and mouse"}},
                 {"display", "classic_resolution", cfg::Type::Bool, "Classic resolution", "The frame drawn at the console's own 480 lines.", &app::g_render_classic},
                 {"effects", "full_detail", cfg::Type::Bool, "Full detail trees", "Trees keep their full model at any distance.", &g_tw_full_detail}},
     .load = nullptr,                      // reads more from the settings file's toml::table
@@ -42,6 +43,8 @@ const app::GameInfo app::kGame = {
     .ui = TW_Ui,                          // ImGui drawing each frame
     .pad = TW_Pad,                        // changes a polled pad
     .rumble = nullptr,                    // changes a rumble before it is set
+    .key_defaults = {{keys::kA, "Enter, Space"}, {keys::kB, "Backspace"}, {keys::kStart, "Esc, P"}, {keys::kRightTrigger, "Mouse3"}},
+    .mouse_swing = true,                  // hold the left mouse button to swing
     .menu_toggle = TW_MenuToggle,
     .menu_open = TW_MenuOpen,
     .fonts = TW_MenuFonts,
