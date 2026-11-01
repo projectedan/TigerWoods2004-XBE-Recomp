@@ -25,6 +25,8 @@
 #include "imgui.h"
 
 void TW_ApplyScene();
+void TW_GlyphsApply();
+extern uint32_t g_tw_prompts;
 extern bool g_tw_haze, g_tw_bloom, g_tw_focus, g_tw_ao, g_tw_full_detail;
 extern float g_tw_haze_amount, g_tw_bloom_amount;
 
@@ -45,7 +47,7 @@ std::atomic<bool> g_open{false}, g_swallow{false}, g_fresh{false};  // swallow: 
 std::atomic<uint32_t> g_pad[4], g_keys{0};
 ImFont* g_font = nullptr;
 
-enum class Kind { Mode, Scale, Smoothing, VSync, Tick, Amount };
+enum class Kind { Mode, Scale, Smoothing, VSync, Prompts, Tick, Amount };
 struct Row {
     Kind kind;
     const char* label;
@@ -54,7 +56,7 @@ struct Row {
 };
 const std::vector<Row> kPages[2] = {
     {{Kind::Mode, "WINDOW"}, {Kind::Scale, "RESOLUTION SCALING"}, {Kind::Smoothing, "ANTI-ALIASING"}, {Kind::VSync, "V-SYNC"},
-     {Kind::Tick, "FULL DETAIL TREES", &g_tw_full_detail}},
+     {Kind::Prompts, "BUTTON PROMPTS"}, {Kind::Tick, "FULL DETAIL TREES", &g_tw_full_detail}},
     {{Kind::Tick, "DISTANCE HAZE", &g_tw_haze},
      {Kind::Amount, "INTENSITY", nullptr, &g_tw_haze_amount},
      {Kind::Tick, "BLOOM", &g_tw_bloom},
@@ -68,6 +70,7 @@ const char* const kModeNames[3] = {"FULLSCREEN", "BORDERLESS", "WINDOWED"};
 const char* const kScaleNames[4] = {"CLASSIC", "DESKTOP", "2X", "3X"};
 constexpr uint32_t kScalePercent[4] = {100, 100, 200, 300};
 const char* const kSmoothingNames[3] = {"OFF", "SMAA", "MSAA 2X"};
+const char* const kPromptNames[3] = {"AUTO", "XBOX", "PLAYSTATION"};
 
 // the game's look
 constexpr ImU32 kOrange = IM_COL32(236, 124, 32, 255), kOrangeLit = IM_COL32(255, 170, 70, 255), kWhite = IM_COL32(255, 255, 255, 255),
@@ -158,6 +161,11 @@ void Change(const Row& r, int step, bool confirm) {
             break;
         }
         case Kind::VSync: s.vsync = !s.vsync; break;
+        case Kind::Prompts:
+            if (confirm) return;
+            g_tw_prompts = (g_tw_prompts + 3 + step) % 3;
+            TW_GlyphsApply();
+            break;
         case Kind::Tick:
             *r.flag = !*r.flag;
             TW_ApplyScene();
@@ -340,6 +348,7 @@ void Draw() {
                 break;
             }
             case Kind::Smoothing: Text(dl, 16 * u, value, ty, val, kSmoothingNames[SmoothingNow()]); break;
+            case Kind::Prompts: Text(dl, 16 * u, value, ty, val, kPromptNames[g_tw_prompts % 3]); break;
             case Kind::VSync: Tick(dl, u, value, ty + 1 * u, s.vsync, sel); break;
             case Kind::Tick: Tick(dl, u, value, ty + 1 * u, *r.flag, sel); break;
             case Kind::Amount: {

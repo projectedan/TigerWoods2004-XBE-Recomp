@@ -9,6 +9,7 @@
 #include "core/log.h"
 
 void TW_MenuPad(int port, input::Pad& pad);  // tw_menu.cpp
+void TW_GlyphsPad(int port);                 // tw_glyphs.cpp
 
 static void AutoPad(int port, input::Pad& pad) {
     static float first = -1, last = 0, period = 2;
@@ -65,6 +66,7 @@ static void VsyncCycle() {
 }
 
 void TW_Pad(int port, input::Pad& pad) {
+    TW_GlyphsPad(port);
     if (port == 0) {
         ModeCycle();
         VsyncCycle();

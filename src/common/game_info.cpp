@@ -11,6 +11,7 @@ void TW_FileOpened(const char* name);  // src/game/tw_text.cpp
 void TW_TextStart();
 extern bool g_tw_haze, g_tw_bloom, g_tw_focus, g_tw_ao, g_tw_full_detail;
 extern float g_tw_haze_amount, g_tw_bloom_amount;
+extern uint32_t g_tw_prompts;
 
 // what the runtime asks of the game; strings must be set, hooks may stay null
 const app::GameInfo app::kGame = {
@@ -29,6 +30,7 @@ const app::GameInfo app::kGame = {
                 {"effects", "bloom_intensity", cfg::Type::Float, "Bloom intensity", "", nullptr, nullptr, nullptr, 0, 100, {}, nullptr, &g_tw_bloom_amount},
                 {"effects", "depth_of_field", cfg::Type::Bool, "Depth of field", "The far distance softens.", &g_tw_focus},
                 {"effects", "ambient_occlusion", cfg::Type::Bool, "Ambient occlusion", "Soft shade where things meet the ground and each other.", &g_tw_ao},
+                {"input", "button_prompts", cfg::Type::Choice, "Button prompts", "The buttons shown on screen: those of the controller in use, or a set you choose.", nullptr, &g_tw_prompts, nullptr, 0, 0, {"auto", "xbox", "playstation"}, nullptr, nullptr, {"Auto", "Xbox", "PlayStation"}},
                 {"display", "classic_resolution", cfg::Type::Bool, "Classic resolution", "The frame drawn at the console's own 480 lines.", &app::g_render_classic},
                 {"effects", "full_detail", cfg::Type::Bool, "Full detail trees", "Trees keep their full model at any distance.", &g_tw_full_detail}},
     .load = nullptr,                      // reads more from the settings file's toml::table

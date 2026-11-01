@@ -794,6 +794,7 @@ private:
     bool extent_ok_ = false;                 // and the extent it was asked with, for a capture
     float extent_[4] = {};
     std::unordered_map<uint64_t, PackTex> pack_cache_;
+    std::unordered_map<uint64_t, std::array<PackTex, pack::kStyles>> styled_;  // by hash, each look of a pack::g_styled picture
     std::unordered_set<uint64_t> hud_logged_;  // textures already named as drawn in 2D
     std::unordered_set<uint64_t> dumped_;
     void TexturePack(Tex& tx, const TextureDesc& d, const uint8_t* p, const uint32_t* colours,
@@ -3035,7 +3036,7 @@ void D3D12Backend::UploadTexture(Tex& tx, const TextureDesc& d, const FormatInfo
     // linear textures only for a game's own replacements (g_builtin_contents), never dumped
     bool packable = !d.cube && d.depth == 1 && (!d.linear || pack::g_builtin_contents) && pack::Supported(pf) &&
                     (pack_lib_.Size() || app::Get().texture_dump || pack::g_builtin || pack::g_builtin_contents ||
-                     pack::g_upscale);
+                     pack::g_upscale || pack::g_styled);
     std::vector<std::vector<uint8_t>> levels;
     for (uint32_t f = 0; f < faces; f++) {
         for (uint32_t l = 0; l < tx.levels; l++) {
@@ -3080,6 +3081,22 @@ void D3D12Backend::TexturePack(Tex& tx, const TextureDesc& d, const uint8_t* p, 
         }
     }
     tx.pack_hash = h;
+    if (pack::g_styled && !d.linear && d.width <= pack::kStyledMost && d.height <= pack::kStyledMost && !styled_.count(h)) {
+        std::vector<uint8_t> px, rgba;
+        uint32_t pitch;
+        DecodeLevel(d, 0, 0, p, colours, px, pitch);
+        uint32_t rb = pack::RowBytes(pack::Format(tx.fmt), d.width), rows = pack::Rows(pack::Format(tx.fmt), d.height);
+        std::vector<uint8_t> packed(size_t(rb) * rows);
+        for (uint32_t y = 0; y < rows && size_t(y + 1) * pitch <= px.size(); y++)
+            std::memcpy(&packed[size_t(y) * rb], &px[size_t(y) * pitch], std::min(rb, pitch));
+        auto& looks = styled_[h];
+        pack::Image img;
+        if (pack::ToRgba(pack::Format(tx.fmt), d.width, d.height, packed, rgba) && pack::g_styled(rgba, d.width, d.height, -1, img)) {
+            for (int i = 0; i < pack::kStyles; i++) {
+                if (pack::g_styled(rgba, d.width, d.height, i, img)) CreatePackTexture(img, pack::PngName(d.width, d.height, h), looks[size_t(i)]);
+            }
+        }
+    }
     const std::filesystem::path* file = pack_lib_.Find(h);
     if (!file && !pack::g_builtin && !pack::g_builtin_contents && !pack::g_upscale) return;
     auto [it, fresh] = pack_cache_.try_emplace(h);
@@ -3256,6 +3273,17 @@ ID3D12Resource* D3D12Backend::BindGuestTexture(const State& s, int stage, const 
         g_screen_space_test(s)) {
         hud_logged_.insert(tx.pack_hash);
         LOGR("texture pack: drawn in 2D (HUD, menu, text): %s", pack::PngName(d.width, d.height, tx.pack_hash).c_str());
+    }
+    if (!styled_.empty() && tx.pack_hash && !g_pack_off) {
+        auto look = styled_.find(tx.pack_hash);
+        if (look != styled_.end()) {
+            const PackTex& pt = look->second[size_t(std::clamp(pack::g_style.load(std::memory_order_relaxed), 0, pack::kStyles - 1))];
+            if (pt.res) {
+                stages.sv[stage].Format = pt.fmt;
+                stages.sv[stage].Texture2D.MipLevels = pt.levels;
+                return pt.res.Get();
+            }
+        }
     }
     if (tx.repl && !g_pack_off) {
         stages.sv[stage].Format = tx.repl_fmt;

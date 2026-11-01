@@ -213,6 +213,8 @@ bool ReadPng(const std::filesystem::path& file, Image& img) {
 BuiltinTexture g_builtin = nullptr;
 BuiltinContents g_builtin_contents = nullptr;
 UpscaleTexture g_upscale = nullptr;
+StyledTexture g_styled = nullptr;
+std::atomic<int> g_style{0};
 
 void Upscale(const std::vector<uint8_t>& rgba, uint32_t w, uint32_t h, uint32_t k, std::vector<uint8_t>& out) {
     // premultiplied, so clear texels' colour does not bleed into the edges

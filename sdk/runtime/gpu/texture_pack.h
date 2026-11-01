@@ -4,6 +4,7 @@
 // both: textures/dump/<w>x<h>_<16 hex digits>.png, and packs anywhere under textures/replace/ whose names end in the
 // same 16 digits (a prefix is allowed: hud_health_256x64_0123456789abcdef.png). A DDS file keeps its own mip levels;
 // a PNG gets them made.
+#include <atomic>
 #include <cstdint>
 #include <filesystem>
 #include <string>
@@ -54,6 +55,14 @@ extern BuiltinContents g_builtin_contents;
 // console made it): true for one to redraw, at g_upscale_factor times its size, cubic with its edges sharpened
 using UpscaleTexture = bool (*)(uint64_t hash);
 extern UpscaleTexture g_upscale;
+// a game's pictures with another look for each kind of controller (button pictures), known by level 0 of a texture no
+// larger than kStyledMost: style -1 asks only whether it is one; otherwise that style's look (input::Style), or false
+// to show it as it is
+using StyledTexture = bool (*)(const std::vector<uint8_t>& rgba, uint32_t w, uint32_t h, int style, Image& out);
+extern StyledTexture g_styled;
+constexpr int kStyles = 3;
+constexpr uint32_t kStyledMost = 64;
+extern std::atomic<int> g_style;  // the look to show
 // rgba (w x h, rows packed) redrawn k times larger, sharp: cubic, then an unsharp mask scaled to the new size
 void Upscale(const std::vector<uint8_t>& rgba, uint32_t w, uint32_t h, uint32_t k, std::vector<uint8_t>& out);
 // an RGBA8 or BGRA8 picture's mip levels below level 0, each made by halving

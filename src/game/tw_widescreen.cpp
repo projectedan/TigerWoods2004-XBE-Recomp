@@ -140,6 +140,8 @@ void TW_TrailSource(X86Context& ctx, uint8_t* base) {
 // [effects]: the pass over the 3D (gpu::g_scene_pass), on and off and how strong, from the menu (tw_menu.cpp). Each
 // amount runs 0 to 1, a half being the look first settled on; depth of field and ambient occlusion are on or off, at
 // the strength judged right
+void TW_GlyphsStart();  // tw_glyphs.cpp
+
 bool g_tw_haze = true, g_tw_bloom = true, g_tw_focus = true, g_tw_ao = true;
 float g_tw_haze_amount = 0.7f, g_tw_bloom_amount = 0.5f;
 
@@ -176,6 +178,7 @@ void TW_Window(void*) {
     if (pass) gpu::g_scene_pass = std::atoi(pass);
     gpu::g_projection_hook = Projection;
     gpu::g_ortho_place = Place;
+    TW_GlyphsStart();
     if (app::Widescreen()) {
         gpu::g_wide_targets = true;
         gpu::g_program_widen = (4.0f / 3.0f) / app::FrameAspect();
