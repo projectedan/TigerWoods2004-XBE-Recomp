@@ -160,6 +160,8 @@ std::filesystem::path LogFolder();       // --log's folder, or logs beside the e
 void LogSystem();    // the machine and the settings, at a run's start
 void SetThreadCores(uint64_t mask);  // this thread on those cores, 0 all the process may use
 uint64_t OneCoreMask();  // the fastest processor core, as an affinity mask (for [system] one_core)
+uint64_t AllCoresBut(uint64_t mask);  // the cores the process may use, less those
+void PreciseWait(int64_t ns);  // sleeps that long without spinning, to well under a millisecond where the system can
 void ApplyDisplay();  // any thread
 struct Mode {
     uint32_t width, height;

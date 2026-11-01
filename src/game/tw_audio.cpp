@@ -1,6 +1,7 @@
 // Tiger Woods PGA Tour 2004: F9 switches the resampler while the game runs, to compare by ear.
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstdlib>
 #include <cstdint>
 #include <thread>
@@ -47,12 +48,22 @@ void TW_Ui(double) {
         last = now;
         n++;
         maxms = std::max(maxms, ms);
+        static double near_sum, near_square;
+        static int near_n;
+        if (ms < 25) {  // the spread of ordinary frames: a load's stall would swamp it
+            near_sum += ms;
+            near_square += ms * ms;
+            near_n++;
+        }
         over[0] += ms > 18;
         over[1] += ms > 20;
         over[2] += ms > 25;
         over[3] += ms > 34;
         if (now - start > std::chrono::seconds(5)) {
-            LOGR("frames: %d in 5 s, over 18 ms %d, 20 ms %d, 25 ms %d, 34 ms %d, longest %.1f", n, over[0], over[1], over[2], over[3], maxms);
+            double mean = near_n ? near_sum / near_n : 0, spread = near_n ? std::sqrt(std::max(0.0, near_square / near_n - mean * mean)) : 0;
+            near_sum = near_square = 0;
+            near_n = 0;
+            LOGR("frames: %d in 5 s, spread %.2f ms, over 18 ms %d, 20 ms %d, 25 ms %d, 34 ms %d, longest %.1f", n, spread, over[0], over[1], over[2], over[3], maxms);
             n = 0;
             over[0] = over[1] = over[2] = over[3] = 0;
             maxms = 0;

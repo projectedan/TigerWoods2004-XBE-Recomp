@@ -5340,6 +5340,25 @@ void D3D12Backend::Present(const Surface& front) {
     auto perf_swap = PerfClock::now();
     auto present_start = std::chrono::steady_clock::now();
     HRESULT hr = swap_->Present(vsync ? g_present_interval.load() : 0, !vsync && tearing_ ? DXGI_PRESENT_ALLOW_TEARING : 0);
+    // testing, XBE_PERF: what reached the screen, in refreshes between frames shown, from the swap chain's own count
+    if (diag::Perf()) {
+        DXGI_FRAME_STATISTICS st{};
+        static UINT last_present = 0, last_sync = 0;
+        static int shown[6], stats_frames = 0;
+        if (SUCCEEDED(swap_->GetFrameStatistics(&st)) && st.PresentCount != last_present) {
+            if (last_present) {
+                UINT frames = st.PresentCount - last_present, refreshes = st.SyncRefreshCount - last_sync;
+                shown[std::min<UINT>(refreshes / std::max(frames, 1u), 5)] += int(frames);
+            }
+            last_present = st.PresentCount;
+            last_sync = st.SyncRefreshCount;
+        }
+        if (++stats_frames == 300) {
+            LOGR("shown: frames at 1 refresh %d, 2 refreshes %d, 3 refreshes %d, 4 or more %d", shown[1], shown[2], shown[3], shown[4] + shown[5]);
+            std::memset(shown, 0, sizeof(shown));
+            stats_frames = 0;
+        }
+    }
     // V-Sync at every second refresh (a 120 Hz screen): the frames' blanks fall on either of its two slots, by chance of
     // when they began. On the wrong one each Present waits most of a frame, and frames arrive unevenly at a steady 60
     static double blocked_ms = 0;

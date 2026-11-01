@@ -373,6 +373,10 @@ void VerticalBlank(X86Context& ctx) {
     using clock = std::chrono::steady_clock;
     uint32_t info = mem::AllocSystem(12), shown = 0;
     auto next = clock::now();
+    // the waits on the other cores: on the game's, its code running would hold a blank back (frames' spread 0.12 ms to 0.07)
+    const uint64_t game_core = app::Get().one_core ? app::OneCoreMask() : 0;
+    const bool apart = game_core != 0;
+    if (apart) app::SetThreadCores(app::AllCoresBut(game_core));
     // The blank follows the display when its refresh is a whole multiple of 60 (60, 120, 240 Hz): each frame is on
     // screen for the same number of refreshes. On any other display (144 Hz), or where the wait does not work, it
     // stays on the clock, 60 a second. divisor: refreshes a blank, 0 not measured yet, -1 the clock.
@@ -458,9 +462,22 @@ void VerticalBlank(X86Context& ctx) {
         if (target < last + period / 2) target += period;
         last = target;
         auto until = clock::time_point(std::chrono::duration_cast<clock::duration>(ns(int64_t(target))));
-        while (until - clock::now() > std::chrono::milliseconds(3)) std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        constexpr auto kShort = std::chrono::microseconds(300);  // the timer's own lateness, waited out by the last yields
+        app::PreciseWait(std::chrono::duration_cast<ns>(until - clock::now() - kShort).count());
         while (clock::now() < until) std::this_thread::yield();
         next = clock::now();
+        if (diag::Perf()) {
+            static double late_sum = 0, late_max = 0;
+            static int late_n = 0;
+            double late = std::chrono::duration<double, std::micro>(next - until).count();
+            late_sum += late;
+            late_max = std::max(late_max, late);
+            if (++late_n == 300) {
+                LOGR("blank: %.0f us late on average, at most %.0f", late_sum / late_n, late_max);
+                late_sum = late_max = 0;
+                late_n = 0;
+            }
+        }
         return true;
     };
     for (;;) {
@@ -480,7 +497,11 @@ void VerticalBlank(X86Context& ctx) {
             W32(info, count);
             W32(info + 4, swaps);
             W32(info + 8, swaps != shown);
+            // the game's code keeps to its own core
+            LOG_FIRST(1, "d3d: the game has a blank callback, %08X", callback);
+            if (apart) app::SetThreadCores(game_core);
             CallGuest(ctx, callback, {info});
+            if (apart) app::SetThreadCores(app::AllCoresBut(game_core));
         }
         shown = swaps;
         {

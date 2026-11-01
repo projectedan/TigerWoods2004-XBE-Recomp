@@ -15,6 +15,9 @@
 #include <cstring>
 #include <ctime>
 #include <string>
+#include <chrono>
+#include <cstdlib>
+#include <thread>
 #include <vector>
 
 #include "app/app.h"
@@ -96,6 +99,30 @@ void SetThreadCores(uint64_t mask) {
     DWORD_PTR process = 0, system = 0;
     if (!mask) GetProcessAffinityMask(GetCurrentProcess(), &process, &system);
     SetThreadAffinityMask(GetCurrentThread(), DWORD_PTR(mask ? mask : process));
+}
+
+uint64_t AllCoresBut(uint64_t mask) {
+    DWORD_PTR process = 0, system = 0;
+    GetProcessAffinityMask(GetCurrentProcess(), &process, &system);
+    uint64_t rest = uint64_t(process) & ~mask;
+    return rest ? rest : uint64_t(process);
+}
+
+void PreciseWait(int64_t ns) {
+    if (ns <= 0) return;
+#ifdef _WIN32
+#ifndef CREATE_WAITABLE_TIMER_HIGH_RESOLUTION
+#define CREATE_WAITABLE_TIMER_HIGH_RESOLUTION 0x00000002
+#endif
+    static thread_local HANDLE timer = CreateWaitableTimerExW(nullptr, nullptr, CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, TIMER_ALL_ACCESS);
+    LARGE_INTEGER due;
+    due.QuadPart = -ns / 100;
+    if (timer && SetWaitableTimer(timer, &due, 0, nullptr, nullptr, FALSE)) {
+        WaitForSingleObject(timer, INFINITE);
+        return;
+    }
+#endif
+    std::this_thread::sleep_for(std::chrono::nanoseconds(ns));
 }
 
 uint64_t OneCoreMask() {
