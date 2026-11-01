@@ -118,14 +118,14 @@ inline float MovieFitTop(float share) {
 // set by a game that shows its 4:3 frame wider (app::FrameAspect): render targets get that much more width, so the
 // frame is drawn at the screen's own resolution instead of stretched sideways. Off: targets keep the guest's shape.
 inline std::atomic<bool> g_wide_targets{false};
-// set by a game: a pass over the finished 3D, before the first 2D draw of a frame with 3D in it. 0 off; bits: 1 distance
-// haze, 2 bloom, 4 depth of field, 16 ambient occlusion. Alone, tests: 8 distance as grey, 32 the occlusion as grey
+// set by a game: a pass over the finished 3D, before the first 2D draw of a frame with 3D in it. 0 off; bits:
+// 2 bloom, 4 depth of field, 16 ambient occlusion. Alone, tests: 8 distance as grey, 32 the occlusion as grey
 inline std::atomic<int> g_scene_pass{0};
 inline bool g_in_scene = false;  // the renderer: this frame has 3D on the screen's own target, as g_ortho_place is called
 inline uint64_t g_frame_no = 0;  // and which frame that is
-// its values: haze from this distance, thinning over this one, at most this much; what is brighter than this glows, by
+// its values: what is brighter than this glows, by
 // this much; sharp to this distance, fully blurred at this one, by this share of the height
-inline std::atomic<float> g_haze_start{40}, g_haze_range{400}, g_haze_most{0.38f}, g_bloom_bright{0.62f}, g_bloom_glow{0.8f},
+inline std::atomic<float> g_bloom_bright{0.62f}, g_bloom_glow{0.8f},
     g_focus_near{150}, g_focus_far{500}, g_focus_blur{0.008f}, g_ao_strength{1.5f};
 // set by a game: called with each draw's state before it is drawn (to look at what the game draws). Null for none.
 using DrawObserver = void (*)(const State& s);

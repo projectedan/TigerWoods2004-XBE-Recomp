@@ -2400,7 +2400,7 @@ void D3D12Backend::Pass(const char* hlsl, const char* entry, DXGI_FORMAT rtv, D3
     bound_rt_ = bound_ds_ = nullptr;
 }
 
-// p0: depth = x + y / distance, haze from distance z, thinning over w. p1: the haze's colour, its most (a).
+// p0: depth = x + y / distance.
 // p2: x glows past this, y by this much, z sharp to this distance, w fully blurred here. p3: x the blur, of the height,
 // y and z the projection's width and height terms, w the occlusion's strength. p4: x what is on, as g_scene_pass
 const char kScenePass[] = R"(
@@ -2417,12 +2417,6 @@ O vs(uint id : SV_VertexID) {
     return o;
 }
 float Distance(float d) { return p0.y / max(d - p0.x, 1e-7); }
-float3 Haze(int3 at, float3 c) {
-    float d = t1.Load(at);
-    if (d < 1e-6) return c;  // depth as cleared: sky, and water, which writes none over nothing
-    float f = p1.a * (1 - exp(-max(Distance(d) - p0.z, 0) / p0.w));
-    return lerp(c, p1.rgb, f);
-}
 // the glow around bright pixels: a spiral of taps out to 3% of the height, what passes p2.x, added back at p2.y
 static const int kTaps = 24;
 static const float kRadius = 0.03;
@@ -2435,6 +2429,8 @@ float3 Glow(float2 uv) {
     for (int n = 0; n < kTaps; n++) {
         float r = sqrt((n + 0.5) / kTaps) * kRadius, a = n * 2.39996;
         float2 tap = uv + float2(cos(a) * r * h / w, sin(a) * r);
+        // off the picture there is nothing to glow: clamped, these taps would all read its edge row, a flash along it
+        if (tap.x < 0 || tap.x > 1 || tap.y < 0 || tap.y > 1) continue;
         // what is close leaves the average, or the sky beside the golfer takes less than the sky around it: a dim ring
         float t = GlowHere(int3(tap * float2(w, h), 0));
         sum += max(t0.SampleLevel(LinearSampler, tap, 0).rgb - p2.x, 0) * t;
@@ -2532,7 +2528,6 @@ float4 scene(O i) : SV_Target {
     float4 c = t0.Load(at);
     float3 o = (on & 4) ? Focus(at, i.uv, c.rgb) : c.rgb;
     if ((on & 16) && t1.Load(at) >= 1e-6) o *= pow(Light(at), p3.w);
-    if (on & 1) o = Haze(at, o);
     if (on & 2) o += Glow(i.uv) * GlowHere(at);
     return float4(o, c.a);
 }
@@ -2582,7 +2577,6 @@ void D3D12Backend::ScenePass(const State& s) {
 
 void D3D12Backend::RunScenePass() {
     if (!g_scene_pass.load(std::memory_order_relaxed)) return;
-    constexpr float kColor[3] = {0.62f, 0.69f, 0.73f};
     if (scene_done_ == frame_ || scene_frame_ != frame_ || scene_draws_ < kSceneMinDraws) return;
     Target* rt = FindTarget(scene_rt_, false);
     Target* ds = FindTarget(scene_zs_, true);
@@ -2611,7 +2605,7 @@ void D3D12Backend::RunScenePass() {
     }
     ID3D12Resource* const src[3] = {color, ds->res.Get(), occlude ? ao_.Get() : nullptr};
     const DXGI_FORMAT fmt[3] = {rt->fmt, DXGI_FORMAT_R24_UNORM_X8_TYPELESS, DXGI_FORMAT_R8_UNORM};
-    const float p[8] = {scene_z_[0], scene_z_[1], g_haze_start.load(), g_haze_range.load(), kColor[0], kColor[1], kColor[2], g_haze_most.load()};
+    const float p[8] = {scene_z_[0], scene_z_[1]};
     const float more[16] = {g_bloom_bright.load(), g_bloom_glow.load(), g_focus_near.load(), g_focus_far.load(), g_focus_blur.load(),
                             scene_xy_[0], scene_xy_[1], g_ao_strength.load(), float(occlude ? on : on & ~16)};
     pass_more_ = more;
@@ -4339,6 +4333,9 @@ void D3D12Backend::ClearTarget(Target& t, const State& s, const ClearArgs& c, st
 void D3D12Backend::Clear(const State& s, uint32_t count, const uint8_t* rects, uint32_t flags, uint32_t color, float z,
                          uint32_t stencil) {
     FlushBatch();
+    // depth wiped within the frame (the ball's spin picture): the scene pass first, as it reads that depth. The sun's
+    // test usually brings it on sooner, but a course may have no sun, and its picture would stand as a square of no haze
+    if ((flags & kClearZ) && s.zs.data == scene_zs_.data) RunScenePass();
     PerfScope perf_clear{g_perf.clear};
     if (cap_) {
         CapStep(s.rt);

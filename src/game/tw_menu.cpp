@@ -36,8 +36,8 @@ void TW_ApplyScene();
 void TW_GlyphsApply();
 void TW_GlyphsKey();
 extern uint32_t g_tw_prompts;
-extern bool g_tw_haze, g_tw_bloom, g_tw_focus, g_tw_ao, g_tw_full_detail;
-extern float g_tw_haze_amount, g_tw_bloom_amount;
+extern bool g_tw_bloom, g_tw_focus, g_tw_ao, g_tw_full_detail;
+extern float g_tw_bloom_amount;
 
 namespace {
 
@@ -56,7 +56,7 @@ std::atomic<bool> g_open{false}, g_swallow{false}, g_fresh{false};  // swallow: 
 std::atomic<uint32_t> g_pad[4], g_keys{0};
 ImFont* g_font = nullptr;
 
-enum class Kind { Mode, Scale, Smoothing, VSync, Prompts, Tick, Amount };
+enum class Kind { Mode, Scale, Smoothing, Filtering, VSync, Prompts, Tick, Amount };
 struct Row {
     Kind kind;
     const char* label;
@@ -65,11 +65,9 @@ struct Row {
 };
 constexpr int kPageCount = 3;
 const std::vector<Row> kPages[kPageCount] = {
-    {{Kind::Mode, "WINDOW"}, {Kind::Scale, "RESOLUTION SCALING"}, {Kind::Smoothing, "ANTI-ALIASING"}, {Kind::VSync, "V-SYNC"},
+    {{Kind::Mode, "WINDOW"}, {Kind::Scale, "RESOLUTION SCALING"}, {Kind::Smoothing, "ANTI-ALIASING"}, {Kind::Filtering, "TEXTURE FILTERING"}, {Kind::VSync, "V-SYNC"},
      {Kind::Prompts, "BUTTON PROMPTS"}, {Kind::Tick, "FULL DETAIL TREES", &g_tw_full_detail}},
-    {{Kind::Tick, "DISTANCE HAZE", &g_tw_haze},
-     {Kind::Amount, "INTENSITY", nullptr, &g_tw_haze_amount},
-     {Kind::Tick, "BLOOM", &g_tw_bloom},
+    {{Kind::Tick, "BLOOM", &g_tw_bloom},
      {Kind::Amount, "INTENSITY", nullptr, &g_tw_bloom_amount},
      {Kind::Tick, "DEPTH OF FIELD", &g_tw_focus},
      {Kind::Tick, "AMBIENT OCCLUSION", &g_tw_ao}},
@@ -82,6 +80,8 @@ const char* const kModeNames[3] = {"FULLSCREEN", "BORDERLESS", "WINDOWED"};
 const char* const kScaleNames[4] = {"CLASSIC", "DESKTOP", "2X", "3X"};
 constexpr uint32_t kScalePercent[4] = {100, 100, 200, 300};
 const char* const kSmoothingNames[3] = {"OFF", "SMAA", "MSAA 2X"};
+const char* const kFilterNames[5] = {"OFF", "2X", "4X", "8X", "16X"};
+constexpr uint32_t kFilterValues[5] = {0, 2, 4, 8, 16};
 const char* const kPromptNames[4] = {"AUTO", "XBOX", "PLAYSTATION", "KEYBOARD"};
 
 // the game's look
@@ -104,6 +104,11 @@ int ScaleNow() {
     if (app::g_render_classic) return 0;
     uint32_t p = app::Get().render_percent;
     return p >= 300 ? 3 : p >= 200 ? 2 : 1;
+}
+
+int FilteringNow() {
+    uint32_t a = app::Get().aniso;
+    return a >= 16 ? 4 : a >= 8 ? 3 : a >= 4 ? 2 : a >= 2 ? 1 : 0;
 }
 
 int SmoothingNow() {
@@ -174,6 +179,10 @@ void Change(const Row& r, int step, bool confirm) {
             break;
         }
         case Kind::VSync: s.vsync = !s.vsync; break;
+        case Kind::Filtering:
+            if (confirm) return;
+            s.aniso = kFilterValues[(FilteringNow() + step + 5) % 5];
+            break;
         case Kind::Prompts:
             if (confirm) return;
             g_tw_prompts = (g_tw_prompts + 4 + step) % 4;
@@ -561,7 +570,7 @@ void Draw() {
     app::Settings& s = app::Get();
 
     // a box in the middle of the screen, the height of the longest page so that it holds still between them
-    constexpr size_t kMostRows = 6;
+    constexpr size_t kMostRows = 7;
     float pw = 225 * u, band = 42 * u, tabs = 24 * u, high = 34 * u, gap = 6 * u, exit = 38 * u, foot = 26 * u;
     float body = high * kMostRows + gap * 2 + exit, total = band + tabs + body + foot;
     float left = cx - pw, right = cx + pw, head = (size.y - total) / 2, tab = head + band, top = tab + tabs, bottom = top + body;
@@ -615,6 +624,7 @@ void Draw() {
                 break;
             }
             case Kind::Smoothing: Text(dl, 16 * u, value, ty, val, kSmoothingNames[SmoothingNow()]); break;
+            case Kind::Filtering: Text(dl, 16 * u, value, ty, val, kFilterNames[FilteringNow()]); break;
             case Kind::Prompts: Text(dl, 16 * u, value, ty, val, kPromptNames[g_tw_prompts % 4]); break;
             case Kind::VSync: Tick(dl, u, value, ty + 1 * u, s.vsync, sel); break;
             case Kind::Tick: Tick(dl, u, value, ty + 1 * u, *r.flag, sel); break;

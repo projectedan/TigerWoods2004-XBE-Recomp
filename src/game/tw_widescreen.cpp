@@ -142,8 +142,8 @@ void TW_TrailSource(X86Context& ctx, uint8_t* base) {
 // the strength judged right
 void TW_GlyphsStart();  // tw_glyphs.cpp
 
-bool g_tw_haze = true, g_tw_bloom = true, g_tw_focus = true, g_tw_ao = true;
-float g_tw_haze_amount = 0.7f, g_tw_bloom_amount = 0.5f;
+bool g_tw_bloom = true, g_tw_focus = true, g_tw_ao = true;
+float g_tw_bloom_amount = 0.5f;
 
 // each object's level of detail (0x75DC0): by its distance it gets a level (+0x1D), the next one it dissolves into
 // (+0x1E) and how far through that it is (+0x20), so trees flanking a course cross over in sight. All kept at the first
@@ -157,11 +157,10 @@ void TW_ObjectDetail(X86Context& ctx, uint8_t* base) {
 }
 
 void TW_ApplyScene() {
-    gpu::g_haze_most = g_tw_haze_amount * 0.76f;  // at 0.7, the strength chosen with full detail trees
     gpu::g_bloom_glow = g_tw_bloom_amount * 1.6f;
     gpu::g_focus_blur = 0.05f * 0.016f;
     gpu::g_ao_strength = 0.35f * 3;
-    gpu::g_scene_pass = (g_tw_haze ? 1 : 0) | (g_tw_bloom ? 2 : 0) | (g_tw_focus ? 4 : 0) | (g_tw_ao ? 16 : 0);
+    gpu::g_scene_pass = (g_tw_bloom ? 2 : 0) | (g_tw_focus ? 4 : 0) | (g_tw_ao ? 16 : 0);
 }
 
 void TW_Sample();  // tw_sample.cpp, test only

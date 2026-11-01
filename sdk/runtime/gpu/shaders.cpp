@@ -854,7 +854,8 @@ std::string FixedVertexHlsl(uint16_t regs, bool pretransformed, uint64_t decode,
     o.tc1 = oT1;
     o.tc2 = oT2;
     o.tc3 = oT3;
-    o.fogamt = fogfactor(abs(cp.z));
+    // eye distance, as vertex programs give it: a reversed depth projection leaves z tiny, and the draw all but unfogged
+    o.fogamt = fogfactor(abs(cp.w == 1 ? cp.z : cp.w));
     return o;
 }
 )";

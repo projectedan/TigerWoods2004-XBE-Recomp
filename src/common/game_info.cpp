@@ -10,8 +10,8 @@ bool TW_MenuOpen();
 void TW_MenuFonts();
 void TW_FileOpened(const char* name);  // src/game/tw_text.cpp
 void TW_TextStart();
-extern bool g_tw_haze, g_tw_bloom, g_tw_focus, g_tw_ao, g_tw_full_detail;
-extern float g_tw_haze_amount, g_tw_bloom_amount;
+extern bool g_tw_bloom, g_tw_focus, g_tw_ao, g_tw_full_detail;
+extern float g_tw_bloom_amount;
 extern uint32_t g_tw_prompts;
 
 // what the runtime asks of the game; strings must be set, hooks may stay null
@@ -25,9 +25,7 @@ const app::GameInfo app::kGame = {
     .missing = L"Put the game in the assets folder: its disc image (.iso), or default.xbe with its folders beside it.",
     .images = {{"default.xbe", "TW2004"}},  // each recompiled xbe and its exe, for title launches
     // game settings kept in the settings file; the menu is tw_menu.cpp's
-    .options = {{"effects", "distance_haze", cfg::Type::Bool, "Distance haze", "Far trees and hills fade toward the sky.", &g_tw_haze},
-                {"effects", "haze_intensity", cfg::Type::Float, "Haze intensity", "", nullptr, nullptr, nullptr, 0, 100, {}, nullptr, &g_tw_haze_amount},
-                {"effects", "bloom", cfg::Type::Bool, "Bloom", "A soft glow around the sky and bright areas.", &g_tw_bloom},
+    .options = {{"effects", "bloom", cfg::Type::Bool, "Bloom", "A soft glow around the sky and bright areas.", &g_tw_bloom},
                 {"effects", "bloom_intensity", cfg::Type::Float, "Bloom intensity", "", nullptr, nullptr, nullptr, 0, 100, {}, nullptr, &g_tw_bloom_amount},
                 {"effects", "depth_of_field", cfg::Type::Bool, "Depth of field", "The far distance softens.", &g_tw_focus},
                 {"effects", "ambient_occlusion", cfg::Type::Bool, "Ambient occlusion", "Soft shade where things meet the ground and each other.", &g_tw_ao},
