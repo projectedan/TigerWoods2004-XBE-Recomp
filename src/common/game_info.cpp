@@ -7,6 +7,8 @@ void TW_Window(void* hwnd);  // src/game/tw_widescreen.cpp
 void TW_MenuToggle();              // src/game/tw_menu.cpp
 bool TW_MenuOpen();
 void TW_MenuFonts();
+void TW_FileOpened(const char* name);  // src/game/tw_text.cpp
+void TW_TextStart();
 extern bool g_tw_haze, g_tw_bloom, g_tw_focus, g_tw_ao, g_tw_hud_corners;
 extern float g_tw_haze_amount, g_tw_bloom_amount;
 
@@ -31,7 +33,7 @@ const app::GameInfo app::kGame = {
     .load = nullptr,                      // reads more from the settings file's toml::table
     .save = nullptr,                      // writes more into it
     .init = nullptr,                      // after the settings load, before the window and boot
-    .loaded = nullptr,                    // image in memory, before its entry point runs
+    .loaded = TW_TextStart,               // image in memory, before its entry point runs
     .window = TW_Window,                  // the game window is up
     .message = TW_Message,                // window messages first; true takes one
     .ui = TW_Ui,                          // ImGui drawing each frame
@@ -40,4 +42,5 @@ const app::GameInfo app::kGame = {
     .menu_toggle = TW_MenuToggle,
     .menu_open = TW_MenuOpen,
     .fonts = TW_MenuFonts,
+    .file_opened = TW_FileOpened,
 };

@@ -1,15 +1,22 @@
 // Testing only: TW_SAMPLE=<first second>,<last second> samples every thread's instruction pointer and writes the
 // busiest addresses to tw_sample.txt beside the exe. Nothing happens without the variable.
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
 #include <windows.h>
 
 #include <tlhelp32.h>
 
 #include <algorithm>
+#include <cctype>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <map>
+#include <string>
 #include <vector>
+
+#include "kernel/kernel.h"
 
 void TW_Sample() {
     const char* e = std::getenv("TW_SAMPLE");
@@ -51,6 +58,52 @@ void TW_Sample() {
             std::sort(v.rbegin(), v.rend());
             fprintf(f, "thread %lu samples %d\n", id, total[id]);
             for (size_t i = 0; i < v.size() && i < 6; i++) fprintf(f, "  %d %llx\n", v[i].first, (unsigned long long)v[i].second);
+        }
+        std::fclose(f);
+        return 0;
+    }, nullptr, 0, nullptr);
+}
+
+// Testing only: TW_TEXT=<second>,<second>,... lists the guest's strings about the console to tw_text.txt at those times
+void TW_TextScan() {
+    static const char* e = std::getenv("TW_TEXT");
+    if (!e) return;
+    CreateThread(nullptr, 0, [](void*) -> DWORD {
+        FILE* f = std::fopen("tw_text.txt", "w");
+        std::map<std::string, uint32_t> seen;
+        ULONGLONG t0 = GetTickCount64();
+        for (const char* p = e; *p;) {
+            float at = float(std::atof(p));
+            while (GetTickCount64() - t0 < ULONGLONG(at * 1000)) Sleep(100);
+            const uint8_t* b = kernel::g_base + 0x80000000u;
+            constexpr uint32_t kSize = 64u << 20;
+            auto look = [&](std::string t, uint32_t where, char kind) {
+                std::string low = t;
+                for (char& c : low) c = char(std::tolower(uint8_t(c)));
+                for (const char* w : {"xbox", "memory unit", "hard disk", "controller", "dashboard", "blocks", "storage"})
+                    if (low.find(w) != std::string::npos && seen.emplace(t, where).second) {
+                        for (char& c : t) if (c == '\n') c = '|';
+                        fprintf(f, "%c %.0f %08X %s\n", kind, at, where, t.c_str());
+                        fflush(f);
+                        break;
+                    }
+            };
+            std::string run;
+            for (uint32_t i = 0; i < kSize; i++) {
+                uint8_t c = b[i];
+                if ((c >= 32 && c < 127) || c == 10) { run += char(c); continue; }
+                if (run.size() >= 8) look(run, i - uint32_t(run.size()), 'A');
+                run.clear();
+            }
+            run.clear();
+            for (uint32_t i = 0; i + 1 < kSize; i += 2) {
+                uint8_t c = b[i];
+                if (((c >= 32 && c < 127) || c == 10) && !b[i + 1]) { run += char(c); continue; }
+                if (run.size() >= 8) look(run, i - uint32_t(run.size()) * 2, 'U');
+                run.clear();
+            }
+            while (*p && *p != ',') p++;
+            if (*p) p++;
         }
         std::fclose(f);
         return 0;

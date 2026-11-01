@@ -135,9 +135,11 @@ void TW_ApplyScene() {
 }
 
 void TW_Sample();  // tw_sample.cpp, test only
+void TW_TextScan();
 
 void TW_Window(void*) {
     TW_Sample();
+    TW_TextScan();
     gpu::g_viewport_hook = Viewport;
     gpu::g_scissor_hook = Scissor;
     const char* pass = std::getenv("TW_SCENE_PASS");  // testing: start in that view
