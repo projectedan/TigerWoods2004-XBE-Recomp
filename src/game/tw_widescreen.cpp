@@ -45,6 +45,9 @@ void Projection(float* m) {
 
 // 2D through an orthographic projection: held at 4:3, what covers the screen (fades) stays full
 bool Place(const gpu::State&, float x0, float x1, float y0, float y1, float& a, float& b) {
+    // the pause menu's banner is the submenus' over the course: known by the dimming over the frame, itself full width
+    static uint64_t logo = 0;
+    if (std::fabs(x1 - x0 - 2.149f) < 0.01f && std::fabs(y1 - y0 - 2.0f) < 0.01f) logo = gpu::g_frame_no;
     if (!app::Widescreen() || (x0 < -0.97f && x1 > 0.97f)) return false;
     a = (4.0f / 3.0f) / app::FrameAspect();
     b = 0;
@@ -63,10 +66,7 @@ bool Place(const gpu::State&, float x0, float x1, float y0, float y1, float& a, 
         box_frame = now;
     }
     marker = marker || (box_frame == now && across > box[0] && across < box[1] && up > box[2] && up < box[3]);
-    // the pause menu's banner is the submenus' over the course: known by the dimming over the frame
-    static uint64_t logo = 0;
-    if (std::fabs(wide - 2.149f) < 0.01f && std::fabs(high - 2.0f) < 0.01f) logo = now;
-    bool header = now - logo <= 2;
+    bool header = now - logo <= 2 && y0 > 0.6f;  // (the strip along the foot keeps to the corners)
     // the panels over the strip's right end, the hint and the caddy's tip, go with it whole
     bool panel = x0 > 0.2f && y0 > -0.625f && y1 < -0.3f;
     if (g_tw_hud_corners && gpu::g_in_scene && (strip || panel) && !crossing && !marker && !header) b = (x0 + x1 < 0 ? -1.0f : 1.0f) * (1 - a);

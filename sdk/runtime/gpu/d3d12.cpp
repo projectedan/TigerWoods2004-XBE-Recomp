@@ -609,8 +609,8 @@ private:
     void CaptureDraw(const State& s, uint32_t prim, uint32_t count, const PsoKey& k, const DrawConstants& c,
                      const DrawTextures& stages);
     void CaptureTextures(const State& s, const DrawTextures& stages);
-    void EndDrawCapture(const State& s, const Assembled& a, uint32_t count, const DrawConstants& c);
-    void CaptureInputs(const State& s, const Assembled& a, const DrawConstants& c);
+    void EndDrawCapture(const State& s, const Assembled& a, uint32_t count, const DrawConstants& c, const PsoKey& k);
+    void CaptureInputs(const State& s, const Assembled& a, const DrawConstants& c, size_t verts);
     void CaptureShaders(const State& s, const Assembled& a, const DrawShaders& sh, const PixelKey& pk);
     void CaptureShader(const char* kind, uint64_t key, const std::string& src);
     void SetTextureViewsAndSamplers(const State& s, const Assembled& a, DrawTextures& stages);
@@ -3743,11 +3743,11 @@ void D3D12Backend::CaptureTextures(const State& s, const DrawTextures& stages) {
 constexpr int kVsConstants = 192;
 constexpr int kVsConstantBias = 96;
 
-void D3D12Backend::CaptureInputs(const State& s, const Assembled& a, const DrawConstants& c) {
+void D3D12Backend::CaptureInputs(const State& s, const Assembled& a, const DrawConstants& c, size_t verts) {
     fprintf(cap_, "\n     verts");
     uint32_t n = 0;
     for (int r = 0; r < 16; r++) n += (a.regs >> r) & 1;
-    for (size_t v = 0; v < std::min<size_t>(4, n ? a.vertices.size() / (n * 4) : 0); v++) {
+    for (size_t v = 0; v < std::min<size_t>(verts, n ? a.vertices.size() / (n * 4) : 0); v++) {
         fprintf(cap_, " [");
         for (uint32_t k = 0; k < n * 4; k++) fprintf(cap_, " %g", a.vertices[v * n * 4 + k]);
         fprintf(cap_, " ]");
@@ -3784,9 +3784,11 @@ void D3D12Backend::CaptureDraw(const State& s, uint32_t prim, uint32_t count, co
     CaptureTextures(s, stages);
 }
 
-// small draws: their inputs and constants; then ends the draw's line
-void D3D12Backend::EndDrawCapture(const State& s, const Assembled& a, uint32_t count, const DrawConstants& c) {
-    if (count <= kQuadVertices) CaptureInputs(s, a, c);
+// small draws: their inputs and constants, and all of a thin overlay's vertices; then ends the draw's line
+void D3D12Backend::EndDrawCapture(const State& s, const Assembled& a, uint32_t count, const DrawConstants& c, const PsoKey& k) {
+    constexpr uint32_t kOverlayVertices = 512;
+    if (count <= kQuadVertices) CaptureInputs(s, a, c, 4);
+    else if (k.blend && !k.zwrite && count <= kOverlayVertices) CaptureInputs(s, a, c, count);
     fputc('\n', cap_);
 }
 
@@ -3804,6 +3806,7 @@ void D3D12Backend::CaptureShader(const char* kind, uint64_t key, const std::stri
 
 void D3D12Backend::CaptureShaders(const State& s, const Assembled& a, const DrawShaders& sh, const PixelKey& pk) {
     std::string src = VertexHlsl(s, a, sh);
+    fprintf(cap_, "     shaders %016llX %016llX\n", (unsigned long long)sh.vkey, (unsigned long long)sh.pkey);
     CaptureShader("vs", sh.vkey, sh.quad ? QuadHlsl(std::move(src)) : src);
     CaptureShader("ps", sh.pkey, PixelHlsl(pk));
 }
@@ -3863,7 +3866,9 @@ void D3D12Backend::SetTextureViewsAndSamplers(const State& s, const Assembled& a
         std::memcpy(last_views_.sv, stages.sv, sizeof(last_views_.sv));
     }
     cl_->SetGraphicsRootDescriptorTable(2, Gpu(srv_heap_.Get(), slot, srv_inc_));
-    uint32_t samplers = EnsureStageSamplers(s, stages, UnitTexcoords(a));
+    // a vertex program can move the coordinates past what its inputs say (the putting line scrolls its dashes)
+    bool program = s.vs && !s.vs->program.empty();
+    uint32_t samplers = EnsureStageSamplers(s, stages, !program && UnitTexcoords(a));
     cl_->SetGraphicsRootDescriptorTable(3, Gpu(smp_heap_.Get(), samplers, smp_inc_));
 }
 
@@ -4198,7 +4203,7 @@ void D3D12Backend::Draw(const State& s, uint32_t prim, uint32_t start, uint32_t 
 
     if (cap_) {
         CaptureDraw(s, prim, count, k, c, stages);
-        EndDrawCapture(s, a, count, c);
+        EndDrawCapture(s, a, count, c, k);
         CaptureShaders(s, a, sh, pk);
     }
 
