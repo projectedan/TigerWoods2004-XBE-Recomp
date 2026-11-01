@@ -62,7 +62,10 @@ void TW_FrustumWidth(X86Context& ctx, uint8_t* base) {
     ::kernel::W32(at, bits);
 }
 
+void TW_Sample();  // tw_sample.cpp, test only
+
 void TW_Window(void*) {
+    TW_Sample();
     gpu::g_viewport_hook = Viewport;
     gpu::g_scissor_hook = Scissor;
     gpu::g_projection_hook = Projection;

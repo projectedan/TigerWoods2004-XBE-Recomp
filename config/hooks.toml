@@ -8,3 +8,19 @@ on_true = 0x00110C91
 [[hook]]                   # camera setup: the horizontal half-width of the view, before the side frustum planes are made from it, widened for the frame's shape
 at = 0x000817ED
 call = "TW_FrustumWidth"
+
+
+
+[[hook]]                   # movie loop: the pacing spin -> paced with the wait for the display counted
+at = 0x000F9543
+call = "TW_MoviePace"
+on_true = 0x000F9573
+
+
+[[hook]]                   # movie loop: the picture's draw was issued
+at = 0x000F9540
+call = "TW_MovieDrawn"
+
+[[hook]]                   # movie loop: no new picture yet, polling for the decoder's next one
+at = 0x000F9598
+call = "TW_MovieIdle"

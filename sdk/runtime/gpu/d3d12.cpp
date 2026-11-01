@@ -5010,7 +5010,26 @@ static bool AutoCaptureDue() {
     return true;
 }
 
+namespace {
+std::atomic<IDXGISwapChain*> g_display_swap{nullptr};
+// the output the window is on, looked up now and then as the window can move to another screen
+bool WaitDisplayBlank() {
+    static ComPtr<IDXGIOutput> out;
+    static int uses = 0;
+    IDXGISwapChain* swap = g_display_swap.load();
+    if (!swap) return false;
+    if (!out || ++uses > 600) {
+        uses = 0;
+        out.Reset();
+        if (FAILED(swap->GetContainingOutput(&out))) return false;
+    }
+    return SUCCEEDED(out->WaitForVBlank());
+}
+}  // namespace
+
 void D3D12Backend::Present(const Surface& front) {
+    g_display_swap = swap_.Get();
+    g_wait_display = WaitDisplayBlank;
     FlushBatch();
     PerfScope perf_present{g_perf.present};
     if (cap_) {
@@ -5064,7 +5083,7 @@ void D3D12Backend::Present(const Surface& front) {
     fg_ready_ = false;
     bool vsync = app::Get().vsync;
     auto perf_swap = PerfClock::now();
-    HRESULT hr = swap_->Present(vsync ? 1 : 0, !vsync && tearing_ ? DXGI_PRESENT_ALLOW_TEARING : 0);
+    HRESULT hr = swap_->Present(vsync ? g_present_interval.load() : 0, !vsync && tearing_ ? DXGI_PRESENT_ALLOW_TEARING : 0);
     g_perf.swap += PerfMs(perf_swap);
     // the driver gone (a GPU timeout on a card asked too much of, a driver crash or update): nothing drawn reaches the
     // screen again, so end with the reason rather than show a frozen picture

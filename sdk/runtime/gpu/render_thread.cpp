@@ -29,6 +29,7 @@
 #include "core/diag.h"
 #include "core/log.h"
 #include "core/state_gen.h"
+#include "app/app.h"
 #include "gpu/backend.h"
 #include "gpu/vertex.h"
 #include "kernel/kernel.h"
@@ -528,11 +529,16 @@ private:
     }
 
     void Run() {
+        uint64_t mask_now = 0;
         using SetDescription = HRESULT(WINAPI*)(HANDLE, PCWSTR);
         if (auto set = reinterpret_cast<SetDescription>(
                 reinterpret_cast<void*>(GetProcAddress(GetModuleHandleW(L"kernel32.dll"), "SetThreadDescription"))))
             set(GetCurrentThread(), L"render");
         for (;;) {
+            if (uint64_t m = g_render_mask.load(std::memory_order_relaxed); m != mask_now) {
+                mask_now = m;
+                app::SetThreadCores(m);
+            }
             Batch* b;
             {
                 std::unique_lock lock(m_);

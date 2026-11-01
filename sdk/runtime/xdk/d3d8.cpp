@@ -373,9 +373,60 @@ void VerticalBlank(X86Context& ctx) {
     using clock = std::chrono::steady_clock;
     uint32_t info = mem::AllocSystem(12), shown = 0;
     auto next = clock::now();
+    // The blank follows the display when its refresh is a whole multiple of 60 (60, 120, 240 Hz): each frame is on
+    // screen for the same number of refreshes. On any other display (144 Hz), or where the wait does not work, it
+    // stays on the clock, 60 a second. divisor: refreshes a blank, 0 not measured yet, -1 the clock.
+    constexpr double kBlankUs = 16666.7;
+    int divisor = 0, off_count = 0, settled = 0;
+    auto display_blank = [&] {
+        if (divisor < 0 || !gpu::g_wait_display || !app::Get().vsync) return false;
+        if (!divisor) {
+            // the median of many refreshes: a busy moment makes single waits long. Not during start-up.
+            if (++settled < 120) return false;
+            std::vector<double> gaps;
+            auto t0 = clock::now();
+            for (int i = 0; i < 33; i++) {
+                if (!gpu::g_wait_display()) {
+                    divisor = -1;
+                    return false;
+                }
+                auto t1 = clock::now();
+                if (i) gaps.push_back(std::chrono::duration<double, std::micro>(t1 - t0).count());
+                t0 = t1;
+            }
+            std::nth_element(gaps.begin(), gaps.begin() + 16, gaps.end());
+            double us = gaps[16];
+            int d = int(std::lround(kBlankUs / std::max(us, 1.0)));
+            bool whole = d >= 1 && d <= 8 && std::fabs(us * d - kBlankUs) < 300;
+            divisor = whole ? d : -1;
+            gpu::g_present_interval = whole ? uint32_t(d) : 1u;
+            LOGI("d3d: display refresh %.2f Hz: %s", 1e6 / us, whole ? "blanks follow it" : "blanks stay on the clock");
+            if (!whole) return false;
+        }
+        auto t0 = clock::now();
+        for (int i = 0; i < divisor; i++)
+            if (!gpu::g_wait_display()) {
+                divisor = -1;
+                return false;
+            }
+        // off the display's pace for half a second (moved to another screen, minimized): the clock takes over
+        double us = std::chrono::duration<double, std::micro>(clock::now() - t0).count();
+        off_count = std::fabs(us - kBlankUs) > 4000 ? off_count + 1 : 0;
+        if (off_count > 30) {
+            divisor = -1;
+            gpu::g_present_interval = 1;
+            return false;
+        }
+        next = clock::now();
+        return true;
+    };
     for (;;) {
-        next = std::max(next + std::chrono::microseconds(16667), clock::now());
-        std::this_thread::sleep_until(next);
+        if (!display_blank()) {
+            // an absolute schedule: a late wake-up comes out of the next wait, or the game runs at 17.3 ms a frame
+            next += std::chrono::microseconds(16667);
+            if (next < clock::now() - std::chrono::milliseconds(100)) next = clock::now();
+            std::this_thread::sleep_until(next);
+        }
         if (kernel::Frozen()) continue;  // paused: no blanks, as no time passes for the game
         uint32_t count = Dev(XDK_CDevice_VBlankCount) + 1, swaps = Dev(kDevSwapCount);
         SetDev(XDK_CDevice_VBlankCount, count);
@@ -403,6 +454,11 @@ void VerticalBlank(X86Context& ctx) {
 }  // namespace
 
 gpu::State& State() { return g_state; }
+// everything the title drew so far is with the GPU, its textures read from guest memory
+void FinishDraws() {
+    DeviceLock lock;
+    if (g_backend) g_backend->Flush();
+}
 
 void WaitVBlank(int max_ms) {
     std::unique_lock<std::mutex> l(g_blank_mutex);
@@ -630,7 +686,9 @@ HLE_STDCALL(D3D_MakeRequestedSpace, 2) {
 }
 
 HLE_STDCALL(D3DDevice_BlockUntilVerticalBlank, 0) {
-    std::this_thread::sleep_for(std::chrono::milliseconds(16));
+    LOG_FIRST(2, "d3d: BlockUntilVerticalBlank from %08X", R32(ctx.esp));
+    if (kVBlank) WaitVBlank(20);  // a flat 16 ms sleep overshot to 17.3 ms: 58 fps, drifting against the display
+    else std::this_thread::sleep_for(std::chrono::milliseconds(16));
     return 0;
 }
 HLE_STDCALL(D3DDevice_SetFlickerFilter, 1) { return 0; }

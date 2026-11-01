@@ -124,6 +124,12 @@ inline DrawObserver g_draw_observer = nullptr;
 // set by a game: changes a viewport the game sets before the renderer sees it. Null for none.
 using ViewportHook = void (*)(Viewport& v);
 inline ViewportHook g_viewport_hook = nullptr;
+// waits for the display's next refresh, false if it cannot. Null until a backend has a swap chain that can.
+inline bool (*g_wait_display)() = nullptr;
+// refreshes each picture stays on screen with vsync on: 2 on a 120 Hz display while the game makes 60 frames
+inline std::atomic<uint32_t> g_present_interval{1};
+// the cores the render thread may use, 0 all of them (set by a game: its movies keep it on the game's core)
+inline std::atomic<uint64_t> g_render_mask{0};
 // set by a game: a scissor rectangle (x1, y1, x2, y2) the game sets; true drops it. Null for none.
 using ScissorHook = bool (*)(int32_t x1, int32_t y1, int32_t x2, int32_t y2);
 inline ScissorHook g_scissor_hook = nullptr;

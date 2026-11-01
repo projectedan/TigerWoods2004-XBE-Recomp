@@ -92,6 +92,12 @@ std::string CpuName() {
 
 }  // namespace
 
+void SetThreadCores(uint64_t mask) {
+    DWORD_PTR process = 0, system = 0;
+    if (!mask) GetProcessAffinityMask(GetCurrentProcess(), &process, &system);
+    SetThreadAffinityMask(GetCurrentThread(), DWORD_PTR(mask ? mask : process));
+}
+
 uint64_t OneCoreMask() {
     // the first of the cores with the highest efficiency class: a performance core where they differ
 #ifdef __MINGW32__  // its headers lack the CPU set calls (test builds only): the first core

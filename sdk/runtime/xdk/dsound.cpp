@@ -7,10 +7,12 @@
 #include <deque>
 #include <map>
 #include <string>
+#include <thread>
 #include <cstdlib>
 #include <cstring>
 #include <vector>
 
+#include "app/app.h"
 #include "audio/audio.h"
 #include "audio/reverb.h"
 #include "xbe/xbe.h"

@@ -158,6 +158,7 @@ std::filesystem::path ShaderCacheDir();  // --shader-cache, or shadercache besid
 std::filesystem::path ScreenshotDir();   // --screenshots, or Screenshots beside the exe
 std::filesystem::path LogFolder();       // --log's folder, or logs beside the exe; crash dumps and M captures go by it
 void LogSystem();    // the machine and the settings, at a run's start
+void SetThreadCores(uint64_t mask);  // this thread on those cores, 0 all the process may use
 uint64_t OneCoreMask();  // the fastest processor core, as an affinity mask (for [system] one_core)
 void ApplyDisplay();  // any thread
 struct Mode {

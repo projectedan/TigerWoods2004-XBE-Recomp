@@ -1,4 +1,5 @@
 // Tiger Woods PGA Tour 2004: host versions of XDK 5558 D3D calls the SDK does not replace.
+
 #include <cstdint>
 
 #include "core/log.h"
@@ -51,3 +52,8 @@ HLE_STDCALL(D3DDevice_SetPixelShaderProgram, 1) {
     W32(holder + XDK_PixelShader_Definition, a[0]);
     return ::kernel::CallGuest(ctx, SYM(D3DDevice_SetPixelShader), {holder});
 }
+
+namespace d3d { void FinishDraws(); }
+
+// Movies: the decoder rewrites its picture in guest memory, so the frame's upload is finished before the game goes on
+void TW_MovieDrawn(X86Context&, uint8_t*) { d3d::FinishDraws(); }
