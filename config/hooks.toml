@@ -1,0 +1,10 @@
+
+# ---- Tiger Woods PGA Tour 2004 hooks (appended to game.toml) ----
+[[hook]]                   # XapiInitProcess: failed disc authentication (0x110A52 < 0) -> continue instead of booting to the dashboard (0x110C8C)
+at = 0x00110C8C
+call = "TW_DiscCheckFailed"
+on_true = 0x00110C91
+
+[[hook]]                   # camera setup: the horizontal half-width of the view, before the side frustum planes are made from it, widened for the frame's shape
+at = 0x000817ED
+call = "TW_FrustumWidth"

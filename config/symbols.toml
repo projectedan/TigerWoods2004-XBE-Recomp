@@ -1,0 +1,10 @@
+# Library functions found by hand in default.xbe (make_config.py applies them over xbe_symbols' output)
+D3DDevice_LoadVertexShaderProgram = 0x12A460    # copies a program to device +0x1098, pushes method 0x1E9C
+D3DDevice_SelectVertexShaderDirect = 0x12A080   # copies 64 dwords to 0x13962C, SelectVertexShader(0x139619, address)
+D3DDevice_SetVertexShaderInput = 0x12A930
+D3DDevice_SetVertexShaderInputDirect = 0x12A2F0 # copies 64 dwords to 0x13962C, SetVertexShaderInput(0x139619, ...)
+D3DDevice_SetMaterial = 0x128340                # copies 0x11 dwords to device +0xEF0
+D3DDevice_LightEnable = 0x128E10                # next to SetLight, checks device +0x7A4 lights
+D3DDevice_BeginVisibilityTest = 0x129270        # pushes method 0x17C8
+D3DDevice_EndVisibilityTest = 0x129310
+D3DDevice_GetVisibilityTestResult = 0x128390
