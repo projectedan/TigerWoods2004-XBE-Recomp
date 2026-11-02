@@ -424,7 +424,7 @@ public:
     void RecordLate(uint32_t data) override;
     void Flush() override;
     void SetGamma(const uint8_t* ramp) override;
-    void BeginQuery() override;
+    void BeginQuery(const State& s) override;
     void Screenshot(Target& t, const std::string& suffix = {});  // suffix: a pair's (F7) name after the game's
     int pair_step_ = 0;  // F7: 1 while the pair's second shot is due
     std::string pair_name_;
@@ -1405,8 +1405,12 @@ bool D3D12Backend::EnsureQueries() {
     return true;
 }
 
-void D3D12Backend::BeginQuery() {
+void D3D12Backend::BeginQuery(const State& s) {
     RunScenePass();  // first: inside a query its full screen counts as visible, and the sun's glare goes white
+    // Binding the query's actual targets carries the scene pass back into MSAA.
+    // Do that before BeginQuery, not at the first counted draw. Cached bindings
+    // may have been invalidated by a pass or may still name the other back buffer.
+    BindTargets(s);
     FlushBatch();
     if (!EnsureQueries()) return;
     if (query_active_ >= 0) cl_->EndQuery(query_heap_.Get(), D3D12_QUERY_TYPE_OCCLUSION, UINT(query_active_));  // left unnamed

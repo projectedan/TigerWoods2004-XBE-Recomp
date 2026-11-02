@@ -249,7 +249,7 @@ public:
     }
 
     // in order with the draws; the result straight from the inner backend, which keeps its own lock for it
-    void BeginQuery() override { Query(0, 1); }
+    void BeginQuery(const State& s) override { SendState(s); Query(0, 1); }
     void EndQuery(uint32_t index) override { Query(index, 0); }
     bool QueryResult(uint32_t index, uint32_t& pixels) override { return inner_->QueryResult(index, pixels); }
     bool Queries() const override { return inner_->Queries(); }
@@ -594,7 +594,7 @@ private:
             case Op::Flush: inner_->Flush(); break;
             case Op::Gamma: inner_->SetGamma(data); break;
             case Op::Query:
-                if (c.b) inner_->BeginQuery();
+                if (c.b) inner_->BeginQuery(state_);
                 else inner_->EndQuery(c.a);
                 break;
         }

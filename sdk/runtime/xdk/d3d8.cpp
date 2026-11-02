@@ -1561,7 +1561,7 @@ HLE_STDCALL(D3DDevice_SetPixelShaderConstant, 3) {
 HLE_STDCALL(D3DDevice_BeginVisibilityTest, 0) {
     DeviceLock lock;
     SyncDeferred();
-    if (g_backend) g_backend->BeginQuery();
+    if (g_backend) g_backend->BeginQuery(g_state);
     return 0;
 }
 HLE_STDCALL(D3DDevice_EndVisibilityTest, 1) {

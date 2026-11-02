@@ -46,7 +46,7 @@ public:
     // the XDK's visibility tests: the pixels drawn that pass the depth and stencil tests between Begin and End, which
     // names the test. QueryResult gives the newest finished count for the index, in the title's pixels; false while
     // none has finished. Read from the title's thread while the draws go on.
-    virtual void BeginQuery() {}
+    virtual void BeginQuery(const State&) {}
     virtual void EndQuery(uint32_t /*index*/) {}
     virtual bool QueryResult(uint32_t /*index*/, uint32_t& /*pixels*/) { return false; }
     virtual bool Queries() const { return false; }  // counts them at all

@@ -120,7 +120,7 @@ public:
     void SetGamma(const uint8_t*) override {}
     // counted only when every frame is drawn (REF=1); otherwise the SDK reads everything as visible
     bool Queries() const override { return harness::Env("REF") == 1 && !harness::Env("REF_FROM"); }
-    void BeginQuery() override {
+    void BeginQuery(const State&) override {
         query_from_ = reference::Passed();
         if (++tests_ == 1 || tests_ % 1000 == 0) LOGI("query: %llu visibility tests by frame %llu", tests_, frames_);
     }
