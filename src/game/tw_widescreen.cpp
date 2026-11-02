@@ -73,6 +73,21 @@ bool Place(const gpu::State&, float x0, float x1, float y0, float y1, float& a, 
     if (!app::Widescreen() || (x0 < -0.97f && x1 > 0.97f)) return false;
     a = (4.0f / 3.0f) / app::FrameAspect();
     b = 0;
+    // The first-start lessons draw the controller before the lesson panel and its text.
+    // Recognise that quad, then move the whole lesson group by the same amount this frame.
+    static uint64_t lesson_frame = ~uint64_t(0);
+    if (x0 > 0.23f && x1 < 0.94f && y0 > 0.28f && y1 < 0.85f &&
+        std::fabs(x1 - x0 - 0.671f) < 0.006f && std::fabs(y1 - y0 - 0.535f) < 0.006f)
+        lesson_frame = gpu::g_frame_no;
+    // The training caddy panel sits a little higher/left of the ordinary one. Its
+    // original draw rectangle identifies the whole panel, including its narrow borders.
+    static uint64_t caddy_frame = ~uint64_t(0);
+    static float caddy_box[4];
+    if (x0 > 0.1f && x0 < 0.4f && y0 > -0.7f && y1 < -0.15f &&
+        std::fabs(x1 - x0 - 0.703f) < 0.006f && std::fabs(y1 - y0 - 0.268f) < 0.006f) {
+        caddy_frame = gpu::g_frame_no;
+        caddy_box[0] = x0; caddy_box[1] = x1; caddy_box[2] = y0; caddy_box[3] = y1;
+    }
     // on the course the HUD goes to the corners: its top and bottom strips, each already a left or a right piece, their
     // ends (the plates behind the bars, at 1) on the screen's edges as on the console; the bars run past them.
     // What crosses the middle (messages) and what lies between the strips (the marker, which follows the course) stays
@@ -132,6 +147,17 @@ bool Place(const gpu::State&, float x0, float x1, float y0, float y1, float& a, 
         float inner = left ? x1 : x0, outer = left ? x0 : x1, at = a * inner, edge = left ? -1.01f : 1.01f;
         a = (edge - at) / (outer - inner);
         b = at - a * inner;
+    }
+    if (gpu::g_in_scene) {
+        if (lesson_frame == gpu::g_frame_no) {
+            bool lesson = x0 >= -0.87f && x1 <= 0.02f && y0 >= 0.53f && y1 <= 0.86f;
+            bool controller = x0 >= 0.23f && x1 <= 0.94f && y0 >= 0.28f && y1 <= 0.85f;
+            if (lesson) b = a - 1;
+            else if (controller) b = 1 - a;
+        }
+        if (caddy_frame == gpu::g_frame_no && x0 >= caddy_box[0] - 0.01f &&
+            x1 <= caddy_box[1] + 0.01f && y0 >= caddy_box[2] - 0.02f && y1 <= caddy_box[3] + 0.02f)
+            b = 1 - a;
     }
     return true;
 }
