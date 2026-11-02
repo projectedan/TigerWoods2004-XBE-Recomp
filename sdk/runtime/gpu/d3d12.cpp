@@ -753,9 +753,6 @@ private:
     Surface scene_rt_{}, scene_zs_{};  // what those draws went to
     float scene_z_[2] = {};  // the 3D projection's depth terms: depth = [0] + [1] / distance
     const float* pass_more_ = nullptr;  // sixteen more floats for Pass's b1
-    float scene_xy_[2] = {};            // the same projection's width and height terms
-    ComPtr<ID3D12Resource> ao_;         // the ambient occlusion, as much light as gets in
-    D3D12_RESOURCE_STATES ao_state_ = D3D12_RESOURCE_STATE_RENDER_TARGET;
     int scene_votes_ = 0;
     Recorder cl_;  // the command list, recorded on worker threads (d3d12_record.h)
     ComPtr<ID3D12DescriptorHeap> srv_heap_;
@@ -2404,12 +2401,11 @@ void D3D12Backend::Pass(const char* hlsl, const char* entry, DXGI_FORMAT rtv, D3
 }
 
 // p0: depth = x + y / distance.
-// p2: x glows past this, y by this much, z sharp to this distance, w fully blurred here. p3: x the blur, of the height,
-// y and z the projection's width and height terms, w the occlusion's strength. p4: x what is on, as g_scene_pass
+// p2: x glows past this, y by this much, z sharp to this distance, w fully blurred here. p3: x the blur, of the height.
+// p4: x what is on, as g_scene_pass
 const char kScenePass[] = R"(
 Texture2D t0 : register(t0);
 Texture2D<float> t1 : register(t1);
-Texture2D<float> t2 : register(t2);
 SamplerState LinearSampler : register(s0);
 cbuffer P : register(b1) { float4 p0; float4 p1; float4 p2; float4 p3; float4 p4; };
 struct O { float4 p : SV_Position; float2 uv : TEXCOORD0; };
@@ -2466,75 +2462,14 @@ float3 Focus(int3 at, float2 uv, float3 c) {
     }
     return sum / weight;
 }
-// ambient occlusion: how much of the half space above this pixel the depth around it fills, out to a reach that grows
-// with distance (kAoRadius + kAoGrow per unit), so far tree lines shade the ground under them. Only smooth surfaces
-// take it: the depth of leaves is broken, and they blotch. Taps turned on a 4 x 4 pattern, which Light's 4 x 4 average
-// takes out. Fades by kAoFar: depth is too coarse past that
-static const int kAoTaps = 12;
-static const float kAoRadius = 0.9, kAoGrow = 0.03, kAoFade = 250, kAoFar = 450, kAoBias = 0.25, kAoDark = 2.2;
-float3 ViewAt(int2 at, float w, float h) {
-    float z = Distance(t1.Load(int3(at, 0)));
-    float2 uv = (at + 0.5) / float2(w, h);
-    return float3((uv.x * 2 - 1) * z / p3.y, (1 - uv.y * 2) * z / p3.z, z);
-}
-float ao(O i) : SV_Target {
-    int2 at = int2(i.p.xy);
-    if (t1.Load(int3(at, 0)) < 1e-6) return 1;
-    float w, h;
-    t1.GetDimensions(w, h);
-    float3 c = ViewAt(at, w, h);
-    if (c.z > kAoFar) return 1;
-    // the surface: toward the nearer neighbour on each axis, so an edge does not bend it
-    float3 l = ViewAt(at - int2(1, 0), w, h) - c, r = ViewAt(at + int2(1, 0), w, h) - c;
-    float3 u = ViewAt(at - int2(0, 1), w, h) - c, d = ViewAt(at + int2(0, 1), w, h) - c;
-    float3 dx = abs(l.z) < abs(r.z) ? -l : r, dy = abs(u.z) < abs(d.z) ? -u : d;
-    float3 n = normalize(cross(dx, dy));
-    if (n.z > 0) n = -n;
-    // smooth: the two sides of this pixel run on from each other, whatever the slope
-    float eps = c.z * 0.0005;
-    float bend = max(abs(l.z + r.z) / (abs(l.z) + abs(r.z) + eps), abs(u.z + d.z) / (abs(u.z) + abs(d.z) + eps));
-    float smooth = 1 - smoothstep(0.45, 0.9, bend);
-    if (smooth <= 0) return 1;
-    float radius = kAoRadius + c.z * kAoGrow;
-    float turn = ((at.x & 3) + (at.y & 3) * 4 + 0.5) / 16 * 6.2831853;
-    float reach = min(radius * p3.z / c.z * 0.5, 0.08);  // of the height
-    float occ = 0, weights = 0;
-    for (int k = 0; k < kAoTaps; k++) {
-        float q = sqrt((k + 0.5) / kAoTaps), a = turn + k * 2.39996;
-        int2 tap = at + int2(float2(cos(a), sin(a)) * q * reach * h);
-        float near = 1 - 0.7 * q;  // what touches counts most
-        weights += near;
-        if (t1.Load(int3(tap, 0)) < 1e-6) continue;
-        float3 v = ViewAt(tap, w, h) - c;
-        float len = length(v);
-        occ += saturate(dot(n, v) / max(len, 1e-3) - kAoBias) * saturate(1 - len / (radius * 1.5)) * near;
-    }
-    // the ground takes it most: what stands on it, bodies and trunks, would turn black at that strength
-    float dark = kAoDark * lerp(0.6, 2.0, smoothstep(0.5, 0.85, n.y));
-    return lerp(saturate(1 - occ / weights * dark * smooth), 1, smoothstep(kAoFade, kAoFar, c.z));
-}
-// the occlusion here: the 4 x 4 around it, of what lies at this pixel's depth
-float Light(int3 at) {
-    float own = Distance(t1.Load(at)), sum = 0, weight = 0.001;
-    for (int y = -2; y < 2; y++)
-        for (int x = -2; x < 2; x++) {
-            int3 tap = at + int3(x, y, 0);
-            float t = abs(Distance(t1.Load(tap)) - own) < 0.5 + own * 0.03 ? 1 : 0;
-            sum += t2.Load(tap) * t;
-            weight += t;
-        }
-    return sum / weight;
-}
 float4 scene(O i) : SV_Target {
     int3 at = int3(i.p.xy, 0);
     int on = int(p4.x);
     float4 c = t0.Load(at);
     float3 o = (on & 4) ? Focus(at, i.uv, c.rgb) : c.rgb;
-    if ((on & 16) && t1.Load(at) >= 1e-6) o *= pow(Light(at), p3.w);
     if (on & 2) o += Glow(i.uv) * GlowHere(at);
     return float4(o, c.a);
 }
-float4 aoview(O i) : SV_Target { return float4(pow(Light(int3(i.p.xy, 0)), p3.w).xxx, 1); }
 float4 grey(O i) : SV_Target { return float4(saturate(Distance(t1.Load(int3(i.p.xy, 0))) / 1000).xxx, 1); }
 )";
 
@@ -2563,8 +2498,6 @@ void D3D12Backend::ScenePass(const State& s) {
             if (scene_votes_ == 0) {
                 scene_z_[0] = m[10];
                 scene_z_[1] = m[14];
-                scene_xy_[0] = std::fabs(m[0]);
-                scene_xy_[1] = std::fabs(m[5]);
             }
             scene_votes_ += m[10] == scene_z_[0] && m[14] == scene_z_[1] ? 1 : -1;
         }
@@ -2595,36 +2528,13 @@ void D3D12Backend::RunScenePass(bool frame_end) {
     int on = g_scene_pass.load();
     // no bloom over two views: it would run over what the game adds last, as the rings round the ball
     if (split_ || view_clear_frame_ == frame_) on &= ~2;
-    bool occlude = (on & (16 | 32)) && !free_rtv_.empty();
-    if (occlude && ao_ && (ao_->GetDesc().Width != rt->w || ao_->GetDesc().Height != rt->h)) {
-        CurrentFrame().garbage.push_back(ao_);  // the size changed; the GPU may still read the old one
-        ao_.Reset();
-    }
-    if (occlude && !ao_) {
-        D3D12_HEAP_PROPERTIES hp{D3D12_HEAP_TYPE_DEFAULT};
-        D3D12_RESOURCE_DESC td = Texture2DDesc(DXGI_FORMAT_R8_UNORM, rt->w, rt->h);
-        td.Flags = D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
-        D3D12_CLEAR_VALUE cv{};
-        cv.Format = DXGI_FORMAT_R8_UNORM;
-        ao_state_ = D3D12_RESOURCE_STATE_RENDER_TARGET;
-        if (FAILED(dev_->CreateCommittedResource(&hp, D3D12_HEAP_FLAG_NONE, &td, ao_state_, &cv, IID_PPV_ARGS(&ao_)))) occlude = false;
-    }
-    ID3D12Resource* const src[3] = {color, ds->res.Get(), occlude ? ao_.Get() : nullptr};
-    const DXGI_FORMAT fmt[3] = {rt->fmt, DXGI_FORMAT_R24_UNORM_X8_TYPELESS, DXGI_FORMAT_R8_UNORM};
+    ID3D12Resource* const src[3] = {color, ds->res.Get(), nullptr};
+    const DXGI_FORMAT fmt[3] = {rt->fmt, DXGI_FORMAT_R24_UNORM_X8_TYPELESS, DXGI_FORMAT_UNKNOWN};
     const float p[8] = {scene_z_[0], scene_z_[1]};
     const float more[16] = {g_bloom_bright.load(), g_bloom_glow.load(), g_focus_near.load(), g_focus_far.load(), g_focus_blur.load(),
-                            scene_xy_[0], scene_xy_[1], g_ao_strength.load(), float(occlude ? on : on & ~16)};
+                            0, 0, 0, float(on)};
     pass_more_ = more;
-    if (occlude) {
-        // borrows the next free view without taking it, only for this recording (as Smaa)
-        D3D12_CPU_DESCRIPTOR_HANDLE rh = Cpu(rtv_heap_.Get(), free_rtv_.back(), rtv_inc_);
-        Transition(ao_.Get(), ao_state_, D3D12_RESOURCE_STATE_RENDER_TARGET);
-        dev_->CreateRenderTargetView(ao_.Get(), nullptr, rh);
-        ID3D12Resource* const in[3] = {nullptr, ds->res.Get(), nullptr};
-        Pass(kScenePass, "ao", DXGI_FORMAT_R8_UNORM, rh, rt->w, rt->h, in, fmt, p, -1);
-        Transition(ao_.Get(), ao_state_, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
-    }
-    Pass(kScenePass, on == 8 ? "grey" : on == 32 ? "aoview" : "scene", rt->fmt, View(*rt), rt->w, rt->h, src, fmt, p, -1);
+    Pass(kScenePass, on == 8 ? "grey" : "scene", rt->fmt, View(*rt), rt->w, rt->h, src, fmt, p, -1);
     pass_more_ = nullptr;
     dyn_.Invalidate();
     rep_.ok = false;

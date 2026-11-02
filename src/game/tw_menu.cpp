@@ -36,7 +36,7 @@ void TW_ApplyScene();
 void TW_GlyphsApply();
 void TW_GlyphsKey();
 extern uint32_t g_tw_prompts;
-extern bool g_tw_bloom, g_tw_focus, g_tw_ao, g_tw_full_detail;
+extern bool g_tw_bloom, g_tw_focus, g_tw_full_detail;
 extern float g_tw_bloom_amount, g_tw_focus_amount;
 
 namespace {
@@ -70,8 +70,7 @@ const std::vector<Row> kPages[kPageCount] = {
     {{Kind::Tick, "BLOOM", &g_tw_bloom},
      {Kind::Amount, "INTENSITY", nullptr, &g_tw_bloom_amount},
      {Kind::Tick, "DEPTH OF FIELD", &g_tw_focus},
-     {Kind::Amount, "INTENSITY", nullptr, &g_tw_focus_amount},
-     {Kind::Tick, "AMBIENT OCCLUSION", &g_tw_ao}},
+     {Kind::Amount, "INTENSITY", nullptr, &g_tw_focus_amount}},
     {},  // the controls, to read (DrawControls)
 };
 const char* const kPageNames[kPageCount] = {"DISPLAY", "EFFECTS", "CONTROLS"};

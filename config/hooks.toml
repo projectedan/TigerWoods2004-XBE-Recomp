@@ -29,6 +29,22 @@ call = "TW_MovieIdle"
 at = 0x0007415A
 call = "TW_TrailSource"
 
+[[hook]]                   # the sun's flare: a random number for a piece's width
+at = 0x0009DF1A
+call = "TW_SunSteady"
+
+[[hook]]                   # the sun's flare: a random number for a piece's height
+at = 0x0009DF54
+call = "TW_SunSteady"
+
+[[hook]]                   # the sun's flare: a random number for a second set's width
+at = 0x0009E30B
+call = "TW_SunSteady"
+
+[[hook]]                   # the sun's flare: a random number for a second set's height
+at = 0x0009E345
+call = "TW_SunSteady"
+
 [[hook]]                   # an object's detail: its level, the level it blends to and how far, just stored for this frame
 at = 0x000761DE
 call = "TW_ObjectDetail"

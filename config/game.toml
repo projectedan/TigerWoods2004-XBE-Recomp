@@ -204,7 +204,8 @@ IDirectSoundBuffer_Release                           = 0x13B14A
 IDirectSoundBuffer_SetAllParameters                  = 0
 IDirectSoundBuffer_SetBufferData                     = 0x13CB7B
 IDirectSoundBuffer_SetCurrentPosition                = 0
-IDirectSoundBuffer_SetFilter                         = 0x13C032
+IDirectSoundBuffer_SetFilter                         = 0
+IDirectSoundBuffer_SetEG                             = 0x13C032
 IDirectSoundBuffer_SetFormat                         = 0x13CB5F
 IDirectSoundBuffer_SetFrequency                      = 0x13C55A
 IDirectSoundBuffer_SetHeadroom                       = 0
@@ -313,6 +314,22 @@ call = "TW_MovieIdle"
 [[hook]]                   # camera flight's trail: the rectangle of the last frame it reads, the whole frame like the viewport
 at = 0x0007415A
 call = "TW_TrailSource"
+
+[[hook]]                   # the sun's flare: a random number for a piece's width
+at = 0x0009DF1A
+call = "TW_SunSteady"
+
+[[hook]]                   # the sun's flare: a random number for a piece's height
+at = 0x0009DF54
+call = "TW_SunSteady"
+
+[[hook]]                   # the sun's flare: a random number for a second set's width
+at = 0x0009E30B
+call = "TW_SunSteady"
+
+[[hook]]                   # the sun's flare: a random number for a second set's height
+at = 0x0009E345
+call = "TW_SunSteady"
 
 [[hook]]                   # an object's detail: its level, the level it blends to and how far, just stored for this frame
 at = 0x000761DE

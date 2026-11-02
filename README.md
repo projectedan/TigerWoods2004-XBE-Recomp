@@ -23,7 +23,7 @@ This port was created using the [Xbox XBE Recomp](https://github.com/TGP482/Xbox
 Press **F1**, or **Back + Start** on a controller, to open it over the game. Changes apply at once and are saved.
 
 - **Display** - Window mode, resolution scaling (classic, desktop, 2x and 3x), anti-aliasing (SMAA or 2x MSAA), texture filtering up to 16x, V-Sync, button prompts and full detail trees.
-- **Effects** - Bloom, depth of field and ambient occlusion.
+- **Effects** - Bloom and depth of field.
 - **Controls** - Controller and keyboard and mouse diagrams, matching what you last used.
 
 ### Display
@@ -32,7 +32,7 @@ Press **F1**, or **Back + Start** on a controller, to open it over the game. Cha
 - **Frame pacing** - Frames follow a steady timer, off the game's own processor core.
 
 ### Graphics
-- **Effects** - Bloom, depth of field and ambient occlusion, each of which can be turned off. Bloom is off in splitscreen.
+- **Effects** - Bloom and depth of field, each of which can be turned off. Bloom is off in splitscreen.
 - **Full detail trees** - Trees keep their full model at any distance, without level of detail changes.
 - **Fixes** - Corrected distance fog, the ball's flight trail, the putting line and the shot preview.
 

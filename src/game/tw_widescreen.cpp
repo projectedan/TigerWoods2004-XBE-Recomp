@@ -172,11 +172,10 @@ void TW_TrailSource(X86Context& ctx, uint8_t* base) {
 }
 
 // [effects]: the pass over the 3D (gpu::g_scene_pass), on and off and how strong, from the menu (tw_menu.cpp). Each
-// amount runs 0 to 1, a half being the look first settled on; depth of field and ambient occlusion are on or off, at
-// the strength judged right
+// amount runs 0 to 1, a half being the look first settled on
 void TW_GlyphsStart();  // tw_glyphs.cpp
 
-bool g_tw_bloom = true, g_tw_focus = true, g_tw_ao = true;
+bool g_tw_bloom = true, g_tw_focus = true;
 float g_tw_bloom_amount = 0.5f, g_tw_focus_amount = 0.1f;
 
 // each object's level of detail (0x75DC0): by its distance it gets a level (+0x1D), the next one it dissolves into
@@ -190,11 +189,18 @@ void TW_ObjectDetail(X86Context& ctx, uint8_t* base) {
     ::kernel::W32(object + 0x20, 0);
 }
 
+// The sun's flare (0x9D680) scales each of its pieces, their width and height apart, by a random 1 +- 2.5% new every
+// frame: a disc hundreds of pixels across shimmers, its gradient crawling over the sky. Each random number, just
+// returned here, is put at the middle of its range, a scale of exactly 1. The game's generator still steps.
+void TW_SunSteady(X86Context& ctx, uint8_t*) {
+    constexpr uint32_t kMiddle = 0x400000;  // of the 23 bits kept: 1.5, which comes to a scale of 1
+    ctx.eax = kMiddle;
+}
+
 void TW_ApplyScene() {
     gpu::g_bloom_glow = g_tw_bloom_amount * 1.6f;
     gpu::g_focus_blur = g_tw_focus_amount * 0.008f;  // 10% the strength chosen
-    gpu::g_ao_strength = 0.35f * 3;
-    gpu::g_scene_pass = (g_tw_bloom ? 2 : 0) | (g_tw_focus ? 4 : 0) | (g_tw_ao ? 16 : 0);
+    gpu::g_scene_pass = (g_tw_bloom ? 2 : 0) | (g_tw_focus ? 4 : 0);
 }
 
 void TW_Sample();  // tw_sample.cpp, test only

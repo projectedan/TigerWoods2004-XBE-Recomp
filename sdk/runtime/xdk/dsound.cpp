@@ -185,6 +185,9 @@ struct Voice {
     bool playing = false, looping = false, paused = false;
     bool sync = false;  // held until IDirectSound_SynchPlayback
     bool active = false, ending = false;  // stream: took a packet since it went quiet, quiet again once they run out
+    // the amplitude envelope (SetEG): gain now, and its change per output frame while rising and releasing
+    float level = 1, attack = 0, release = 0;
+    bool releasing = false;
     double pos = 0;  // frames
     uint32_t freq = 0;
     // stream
@@ -368,6 +371,13 @@ float SendLevel(const Voice& v) {
     return 0;
 }
 
+// a voice starting: its attack from silence, or at full level without one. Playing on leaves the envelope where it is.
+void StartEnvelope(Voice& v, bool from_start) {
+    if (v.playing && !v.releasing && !from_start) return;
+    v.releasing = false;
+    v.level = v.attack > 0 ? 0.0f : 1.0f;
+}
+
 // a stream goes quiet: the synch hold ends, a started one loses its pause as well
 void Deactivate(Voice& v) {
     v.sync = false;
@@ -504,6 +514,18 @@ void Render(float* out, uint32_t frames) {
                 a += (a1 - a) * t;
                 b += (b1 - b) * t;
             }
+            if (v.releasing) {
+                v.level -= v.release;
+                if (v.level <= 0) {
+                    v.playing = v.releasing = false;
+                    v.level = 1;
+                    break;
+                }
+            } else if (v.level < 1) {
+                v.level = std::min(v.level + v.attack, 1.0f);
+            }
+            a *= v.level;
+            b *= v.level;
             out[i * 2] += a * g[0][0] + b * g[1][0];
             out[i * 2 + 1] += a * g[0][1] + b * g[1][1];
             if (send > 0) g_send[i] += (v.channels > 1 ? 0.5f * (a + b) : a) * send;
@@ -726,7 +748,7 @@ static void AuditExports() {
         SYM(IDirectSound_DownloadEffectsImage), SYM(IDirectSound_GetEffectData), SYM(IDirectSound_CommitEffectData),
         SYM(IDirectSound_GetOutputLevels), SYM(IDirectSoundBuffer_SetPlayRegion), SYM(IDirectSoundBuffer_SetAllParameters),
         SYM(IDirectSoundBuffer_SetFormat), SYM(IDirectSoundBuffer_SetOutputBuffer), SYM(IDirectSoundBuffer_SetRolloffCurve),
-        SYM(IDirectSoundBuffer_StopEx),
+        SYM(IDirectSoundBuffer_StopEx), SYM(IDirectSoundBuffer_SetEG),
         SYM(XAudioDownloadEffectsImage), SYM(DirectSoundCreateBuffer), SYM(IDirectSound_CreateSoundBuffer),
         SYM(IDirectSoundBuffer_Release), SYM(IDirectSoundBuffer_Unlock), SYM(IDirectSoundBuffer_SetBufferData),
         SYM(IDirectSoundBuffer_Play), SYM(IDirectSoundBuffer_Stop), SYM(IDirectSoundBuffer_SetLoopRegion),
@@ -989,6 +1011,7 @@ BUFFER(SetBufferData, 3) {
     return 0;
 }
 BUFFER(Play, 4) {
+    StartEnvelope(v, a[3] & 2);
     g_starts++;
     if (!v.playing || (a[3] & 2)) {  // no tail of the last sound
         std::memset(v.hist, 0, sizeof v.hist);
@@ -1002,12 +1025,15 @@ BUFFER(Play, 4) {
     return 0;
 }
 BUFFER(Stop, 1) {
+    v.releasing = false;
     v.playing = false;
     v.paused = false;
     return 0;
 }
-// (this, time low, time high, flags): stops now, the release envelope is not reproduced
+// (this, time low, time high, flags): DSBSTOPEX_ENVELOPE lets the voice play out its release, anything else stops it now
 BUFFER(StopEx, 4) {
+    v.releasing = v.playing && (a[3] & 1) && v.release > 0;
+    if (v.releasing) return 0;
     v.playing = false;
     v.paused = false;
     return 0;
@@ -1275,6 +1301,7 @@ static uint32_t PitchToHz(uint32_t pitch) {
 }
 // (this, time low, time high, flags): plays now, the start time is not reproduced
 BUFFER(PlayEx, 4) {
+    StartEnvelope(v, a[3] & 2);
     g_starts++;
     v.playing = true;
     v.paused = false;
@@ -1298,7 +1325,18 @@ BUFFER(SetPitch, 2) {
 }
 // modulation and 3D settings the software mixer does not reproduce yet; accepted so no console code runs
 BUFFER(SetLFO, 2) { return 0; }
-BUFFER(SetEG, 2) { return 0; }
+// (this, DSENVELOPEDESC): which envelope, its mode, then delay, attack, hold, decay and release in units of 512 output
+// frames, then sustain. Tiger Woods 2004 sets only an amplitude attack and release, its crowd and wind fades (a release
+// of 93 is 1 s), so those are what is played. The rise and fall are straight lines, which is not confirmed against a
+// console.
+BUFFER(SetEG, 2) {
+    constexpr uint32_t kAmplitude = 1, kUnit = 512;
+    if (!a[1] || R32(a[1]) != kAmplitude) return 0;
+    uint32_t attack = R32(a[1] + 12), release = R32(a[1] + 24);
+    v.attack = attack ? 1.0f / float(attack * kUnit) : 0.0f;
+    v.release = release ? 1.0f / float(release * kUnit) : 0.0f;
+    return 0;
+}
 BUFFER(SetConeAngles, 4) { return 0; }
 BUFFER(SetConeOrientation, 5) { return 0; }
 BUFFER(SetConeOutsideVolume, 3) { return 0; }
