@@ -41,7 +41,7 @@ bool TW_Message(void*, uint32_t msg, uintptr_t wp, intptr_t lp, intptr_t*) {
     g_shown = std::chrono::steady_clock::now();
     bool on = !audio::g_sinc.load();
     audio::g_sinc = on;
-    g_label = on ? "Resampler: sinc (new)" : "Resampler: linear (old)";
+    g_label = on ? "Resampler: sinc" : "Resampler: linear";
     LOGI("audio: resampler %s", on ? "sinc" : "linear");
     return true;
 }

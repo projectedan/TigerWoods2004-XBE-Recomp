@@ -34,7 +34,12 @@ Press **F1**, or **Back + Start** on a controller, to open it over the game. Cha
 ### Graphics
 - **Effects** - Bloom and depth of field, each of which can be turned off. Bloom is off in splitscreen.
 - **Full detail trees** - Trees keep their full model at any distance, without level of detail changes.
-- **Fixes** - Corrected distance fog, the ball's flight trail, the putting line and the shot preview.
+- **Fixes** - Corrected distance fog, the ball's flight trail, the putting line and the shot preview. The sun's flare holds steady, without the frame to frame shimmer that made the sky crawl.
+
+### Audio
+- The game's own audio effects run as on the console, on an emulated Xbox audio DSP.
+- Crowd and ambient sounds use the game's own fades, so reactions blend into each other.
+- **F9** switches the resampler between linear (the default) and a band-limited sinc, for the session.
 
 ### Controls
 Supports Xbox, PlayStation and Switch controllers, with hot plugging and rumble, or keyboard and mouse.
@@ -64,6 +69,8 @@ Prompts are redrawn at higher resolution for Xbox and PlayStation controllers an
 
 - The mouse swing has a short delay as you start to drag.
 - Left click moves the selection in the game's menus while held.
+- The menu song has occasional faint clicks. They are in the game's own audio data.
+- Not yet tested on Linux or Steam Deck through Proton.
 
 ## Building
 
