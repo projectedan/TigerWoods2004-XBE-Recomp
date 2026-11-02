@@ -15,7 +15,7 @@ This port was created using the [Xbox XBE Recomp](https://github.com/TGP482/Xbox
 - Extract the release, keeping its folders together.
 - Put your game files in the `assets` folder. This can be an ISO, or the extracted data files.
 - Run `TW2004.exe`. The first start compiles the game's code for your PC. This only happens once, and it needs about 1 GB of free space while it works.
-- Settings can be adjusted in the quick menu, or in `settings.toml` beside the exe.
+- Settings can be adjusted in the quick menu. The first change writes `settings.toml` beside the exe, where they can also be edited.
 
 ## Features
 
