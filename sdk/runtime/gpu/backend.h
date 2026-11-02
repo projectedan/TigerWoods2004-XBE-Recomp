@@ -130,6 +130,9 @@ inline std::atomic<float> g_bloom_bright{0.62f}, g_bloom_glow{0.8f},
 // set by a game: called with each draw's state before it is drawn (to look at what the game draws). Null for none.
 using DrawObserver = void (*)(const State& s);
 inline DrawObserver g_draw_observer = nullptr;
+// Opt selected world-space lines into console-width rendering at higher resolutions (D3D12).
+using LineWidthHook = bool (*)(const State& s);
+inline LineWidthHook g_line_width_hook = nullptr;
 // set by a game: changes a viewport the game sets before the renderer sees it. Null for none.
 using ViewportHook = void (*)(Viewport& v);
 inline ViewportHook g_viewport_hook = nullptr;

@@ -349,6 +349,7 @@ struct PsoKey {
     uint32_t rtfmt;
     uint32_t samples;  // anti-aliasing: the bound targets' sample count, 0 or 1 without
     uint32_t a2c;      // alpha to coverage for a cut-out (g_alpha_edges)
+    uint32_t scaled_line;  // console-width world lines at higher resolutions
 };
 
 // Blit's settings past the source and its rectangle
@@ -768,6 +769,7 @@ private:
     std::vector<uint32_t> free_dsv_;
     ComPtr<ID3D12RootSignature> root_;
     std::unordered_map<uint64_t, ComPtr<ID3DBlob>> blobs_;
+    ComPtr<ID3DBlob> scaled_line_gs_;  // compiled before gameplay; shared read-only with pipeline warm-up
     std::unordered_map<uint64_t, uint64_t> shader_src_;  // vertex and pixel program keys to source hash
     std::unordered_map<uint64_t, ComPtr<ID3D12PipelineState>> psos_;
     // pipeline warm-up: every draw pipeline made is listed in the shader cache (pipelines.bin); at the next start a
@@ -968,6 +970,8 @@ bool D3D12Backend::Init(uint32_t width, uint32_t height) {
     CreateHeaps();
     CreateBackBufferViews();
     if (!CreateRootSignature()) return false;
+    uint64_t line_hash;
+    scaled_line_gs_ = Compile(ScaledLineHlsl(), "main", "gs_5_0", line_hash);
     StartWarmUp();
     CreateFrames();
     CreateGammaLut();
@@ -2601,6 +2605,8 @@ void D3D12Backend::FillPipelineDesc(const PsoKey& k, ID3DBlob* vs, ID3DBlob* ps,
     d.pRootSignature = root_.Get();
     d.VS = {vs->GetBufferPointer(), vs->GetBufferSize()};
     d.PS = {ps->GetBufferPointer(), ps->GetBufferSize()};
+    if (k.scaled_line && scaled_line_gs_)
+        d.GS = {scaled_line_gs_->GetBufferPointer(), scaled_line_gs_->GetBufferSize()};
     auto& b = d.BlendState.RenderTarget[0];
     b.BlendEnable = k.blend;
     b.SrcBlend = Blend(k.src, false);
@@ -2668,6 +2674,7 @@ ID3D12PipelineState* D3D12Backend::EnsurePipeline(const PsoKey& k, ID3DBlob* vs,
     D3D12_GRAPHICS_PIPELINE_STATE_DESC d{};
     d.InputLayout = {el, n};
     FillPipelineDesc(k, vs, ps, d);
+
     ComPtr<ID3D12PipelineState> pso;
     g_perf.psos++;
     auto perf_pso = PerfClock::now();
@@ -2781,6 +2788,7 @@ void D3D12Backend::WarmUp(std::vector<PsoKey> keys) {
     size_t made = 0, missing = 0;
     for (const PsoKey& k : keys) {
         if (warm_stop_) break;
+        if (k.scaled_line && !scaled_line_gs_) continue;
         uint64_t h = Hash(&k, sizeof(k));
         {
             std::lock_guard<std::mutex> lock(warm_mu_);
@@ -3495,6 +3503,9 @@ void D3D12Backend::BuildPipelineKey(const State& s, const Assembled& a, uint64_t
     }
     if (k.has_ds) KeyDepthStencil(s, a, k);
     KeyRasterizer(s, a, k);
+    k.scaled_line = a.topology == Topology::Lines && !a.pretransformed &&
+        k.blend && k.zen && !k.zwrite && !bound_mv_ && scaled_line_gs_ &&
+        bound_rt_ && bound_rt_->h > bound_rt_->gh && g_line_width_hook && g_line_width_hook(s);
 }
 
 // alpha test off: compare always, in Cmp() minus 1 terms like the enabled test

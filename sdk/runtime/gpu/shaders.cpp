@@ -862,6 +862,46 @@ std::string FixedVertexHlsl(uint16_t regs, bool pretransformed, uint64_t decode,
     return s;
 }
 
+std::string ScaledLineHlsl() {
+    return Common() + R"(
+VOut lineLerp(VOut a, VOut b, float t) {
+    VOut o;
+    o.pos = lerp(a.pos, b.pos, t);
+    o.d0 = lerp(a.d0, b.d0, t); o.d1 = lerp(a.d1, b.d1, t);
+    o.b0 = lerp(a.b0, b.b0, t); o.b1 = lerp(a.b1, b.b1, t);
+    o.tc0 = lerp(a.tc0, b.tc0, t); o.tc1 = lerp(a.tc1, b.tc1, t);
+    o.tc2 = lerp(a.tc2, b.tc2, t); o.tc3 = lerp(a.tc3, b.tc3, t);
+    o.fogamt = lerp(a.fogamt, b.fogamt, t);
+    return o;
+}
+[maxvertexcount(4)]
+void main(line VOut input[2], inout TriangleStream<VOut> stream) {
+    VOut a = input[0], b = input[1];
+    float lo = 0, hi = 1;
+    float3 da = float3(a.pos.w - 0.0001, a.pos.z, a.pos.w - a.pos.z);
+    float3 db = float3(b.pos.w - 0.0001, b.pos.z, b.pos.w - b.pos.z);
+    [unroll] for (int p = 0; p < 3; p++) {
+        if (da[p] < 0 && db[p] < 0) return;
+        if (da[p] < 0) lo = max(lo, da[p] / (da[p] - db[p]));
+        if (db[p] < 0) hi = min(hi, da[p] / (da[p] - db[p]));
+    }
+    if (lo > hi) return;
+    a = lineLerp(input[0], input[1], lo);
+    b = lineLerp(input[0], input[1], hi);
+    float2 delta = (b.pos.xy / b.pos.w - a.pos.xy / a.pos.w) * surf.xy;
+    float length2 = dot(delta, delta);
+    if (length2 < 1e-10) return;
+    float2 offset = float2(-delta.y, delta.x) * rsqrt(length2) / surf.xy;
+    VOut v = a;
+    v.pos.xy = a.pos.xy + offset * a.pos.w; stream.Append(v);
+    v.pos.xy = a.pos.xy - offset * a.pos.w; stream.Append(v);
+    v = b;
+    v.pos.xy = b.pos.xy + offset * b.pos.w; stream.Append(v);
+    v.pos.xy = b.pos.xy - offset * b.pos.w; stream.Append(v);
+    stream.RestartStrip();
+}
+)";
+}
 std::string PixelHlsl(const PixelKey& k) {
     std::string s = Common();
     s += PsHelpers();

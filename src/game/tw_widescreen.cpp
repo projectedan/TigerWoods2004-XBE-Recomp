@@ -209,6 +209,9 @@ void TW_TextScan();
 void TW_Window(void*) {
     TW_Sample();
     TW_TextScan();
+    // The putting grid is an unlit XYZ/diffuse/UV line strip (FVF 0x142).
+    // Keep its console-pixel width as the render resolution increases.
+    gpu::g_line_width_hook = [](const gpu::State& s) { return s.vs_handle == 0x142; };
     gpu::g_viewport_hook = Viewport;
     gpu::g_scissor_hook = Scissor;
     gpu::g_scissor_map = ScissorMap;

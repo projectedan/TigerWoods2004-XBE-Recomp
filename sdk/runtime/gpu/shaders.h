@@ -57,6 +57,7 @@ struct FixedKey {
 FixedKey MakeFixedKey(const State& s);
 std::string FixedVertexHlsl(uint16_t regs, bool pretransformed, uint64_t decode = 0, const FixedKey& f = {});
 std::string PixelHlsl(const PixelKey& k);
+std::string ScaledLineHlsl();  // expand lines to one guest pixel in screen space
 // a screen quad's vertex or pixel shader: texture coordinates as the quad was drawn, before its far edges were pulled out
 std::string QuadHlsl(std::string s);
 // a shader for a draw into a frame an upscaler (FSR, DLSS) takes: the vertex shader also works out where the vertex was a
