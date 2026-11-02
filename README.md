@@ -39,7 +39,6 @@ Press **F1**, or **Back + Start** on a controller, to open it over the game. Cha
 ### Audio
 - The game's own audio effects run as on the console, on an emulated Xbox audio DSP.
 - Crowd and ambient sounds use the game's own fades, so reactions blend into each other.
-- **F9** switches the resampler between linear (the default) and a band-limited sinc, for the session.
 
 ### Controls
 Supports Xbox, PlayStation and Switch controllers, with hot plugging and rumble, or keyboard and mouse.

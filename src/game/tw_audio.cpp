@@ -1,4 +1,4 @@
-// Tiger Woods PGA Tour 2004: F9 switches the resampler while the game runs, to compare by ear.
+// Tiger Woods PGA Tour 2004: the window's keys, the frame timer for tests and movie pacing.
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -7,7 +7,6 @@
 #include <thread>
 
 #include "app/app.h"
-#include "audio/audio.h"
 #include "gpu/backend.h"
 #include "core/log.h"
 #include "cpu/x86_context.h"
@@ -20,13 +19,12 @@ bool TW_MenuOpen();
 void TW_GlyphsKey();
 
 namespace {
-std::chrono::steady_clock::time_point g_shown, g_movie_seen;
-const char* g_label = "";
+std::chrono::steady_clock::time_point g_movie_seen;
 }
 
 bool TW_Message(void*, uint32_t msg, uintptr_t wp, intptr_t lp, intptr_t*) {
     constexpr uint32_t kKeyDown = 0x100;
-    constexpr uintptr_t kF9 = 0x78, kF1 = 0x70;
+    constexpr uintptr_t kF1 = 0x70;
     constexpr uint32_t kLeftDown = 0x201, kRightDown = 0x204, kMiddleDown = 0x207;
     // any key or click at the quick menu, F1 opening it among them, says the keyboard and mouse are in use: the keys'
     // own read sees none of these while it is open
@@ -37,13 +35,7 @@ bool TW_Message(void*, uint32_t msg, uintptr_t wp, intptr_t lp, intptr_t*) {
         return true;
     }
     if (msg == kKeyDown && TW_MenuKey(wp)) return true;
-    if (msg != kKeyDown || wp != kF9 || (lp & (1 << 30))) return false;
-    g_shown = std::chrono::steady_clock::now();
-    bool on = !audio::g_sinc.load();
-    audio::g_sinc = on;
-    g_label = on ? "Resampler: sinc" : "Resampler: linear";
-    LOGI("audio: resampler %s", on ? "sinc" : "linear");
-    return true;
+    return false;
 }
 
 void TW_Ui(double) {
@@ -84,8 +76,6 @@ void TW_Ui(double) {
     }
     if (gpu::g_render_mask.load() && std::chrono::steady_clock::now() - g_movie_seen > std::chrono::milliseconds(300))
         gpu::g_render_mask = 0;
-    if (std::chrono::steady_clock::now() - g_shown > std::chrono::seconds(2)) return;
-    ImGui::GetForegroundDrawList()->AddText(ImVec2(24, 24), IM_COL32(255, 255, 255, 255), g_label);
 }
 
 // Movies. The loop (0xF9360) spins until 30.3 ms after each swap, which on the console leaves the frame on the next

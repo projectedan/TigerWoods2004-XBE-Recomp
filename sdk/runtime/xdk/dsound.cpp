@@ -201,10 +201,6 @@ struct Voice {
     bool is3d = false;
     uint32_t mode = 0;  // DS3DMODE: 1 head relative, 2 disabled
     float p[3] = {}, min_dist = 1, max_dist = 1e9f;
-    // the resampler's last input frames (ResampleFrame)
-    float hist[2][32] = {};
-    uint32_t hist_at = 0;
-    int64_t hist_frame = -1;
     // ADPCM block cache
     int64_t block = -1;
     int16_t decoded[65 * 8];
@@ -384,63 +380,6 @@ void Deactivate(Voice& v) {
     if (v.active) v.active = v.paused = v.ending = false;
 }
 
-// Band-limited resampling for voices below the mixer's rate, most of this title's sounds (4 to 22 kHz). Interpolating
-// between two samples leaves mirror images of the sound above its own Nyquist frequency, only 12 dB down for a tone at
-// 0.4 of the rate; this windowed sinc leaves them more than 70 dB down. 16 taps, a Kaiser window (beta 7), cutoff 0.9 of
-// the voice's Nyquist, coefficients interpolated between 512 phases. The output is 8 input frames late.
-constexpr uint32_t kTaps = 16, kPhases = 512;
-const float* SincTable() {
-    static const std::vector<float> table = [] {
-        auto i0 = [](double x) {
-            double sum = 1, term = 1;
-            for (int k = 1; term > 1e-12 * sum; k++) {
-                term *= (x / (2 * k)) * (x / (2 * k));
-                sum += term;
-            }
-            return sum;
-        };
-        constexpr double kBeta = 7, kCut = 0.9, kPi = 3.14159265358979323846;
-        std::vector<float> t((kPhases + 1) * kTaps);
-        for (uint32_t p = 0; p <= kPhases; p++) {
-            double c[kTaps], sum = 0;
-            for (uint32_t k = 0; k < kTaps; k++) {
-                double d = double(k) - 7 - double(p) / kPhases, r = d / 8;
-                double w = i0(kBeta * std::sqrt(std::max(0.0, 1 - r * r))) / i0(kBeta);
-                c[k] = w * (d == 0 ? kCut : std::sin(kPi * kCut * d) / (kPi * d));
-                sum += c[k];
-            }
-            for (uint32_t k = 0; k < kTaps; k++) t[p * kTaps + k] = float(c[k] / sum);
-        }
-        return t;
-    }();
-    return table.data();
-}
-
-// a and b, frame f of the voice, go in once each; out comes the voice at frame f - 8 + t
-void ResampleFrame(Voice& v, int64_t f, float t, float& a, float& b) {
-    if (f != v.hist_frame) {
-        v.hist_frame = f;
-        v.hist_at = (v.hist_at + 1) % kTaps;
-        v.hist[0][v.hist_at] = v.hist[0][v.hist_at + kTaps] = a;
-        v.hist[1][v.hist_at] = v.hist[1][v.hist_at + kTaps] = b;
-    }
-    static const float* table = SincTable();
-    float x = t * kPhases;
-    uint32_t p = std::min(uint32_t(x), kPhases - 1);
-    float m = x - float(p), l = 0, r = 0;
-    const float* c0 = table + p * kTaps;
-    const float* c1 = c0 + kTaps;
-    const float* h0 = &v.hist[0][v.hist_at + 1];  // oldest first
-    const float* h1 = &v.hist[1][v.hist_at + 1];
-    for (uint32_t k = 0; k < kTaps; k++) {
-        float c = c0[k] + (c1[k] - c0[k]) * m;
-        l += c * h0[k];
-        r += c * h1[k];
-    }
-    a = l;
-    b = r;
-}
-
 void Render(float* out, uint32_t frames) {
     std::memset(out, 0, frames * 2 * sizeof(float));
     std::unique_lock<std::recursive_mutex> lock(g_lock);
@@ -459,7 +398,6 @@ void Render(float* out, uint32_t frames) {
         uint32_t start = v.looping ? FramesOf(v, v.loop_start) : 0;
         uint32_t end = v.stream ? 0 : FramesOf(v, v.looping ? v.loop_start + v.loop_len : v.play_len);
         const bool mono = v.channels == 1;
-        const bool sinc = step < 1.0 && audio::g_sinc.load(std::memory_order_relaxed);
         for (uint32_t i = 0; i < frames; i++) {
             uint32_t f = uint32_t(v.pos);
             float a, b, a1, b1;  // this frame and the next, interpolated between
@@ -508,12 +446,8 @@ void Render(float* out, uint32_t frames) {
                 b1 = mono ? a1 : Sample(v, base, next, 1);
             }
             float t = float(v.pos - f);
-            if (sinc) {
-                ResampleFrame(v, f, t, a, b);
-            } else {
-                a += (a1 - a) * t;
-                b += (b1 - b) * t;
-            }
+            a += (a1 - a) * t;
+            b += (b1 - b) * t;
             if (v.releasing) {
                 v.level -= v.release;
                 if (v.level <= 0) {
@@ -649,7 +583,7 @@ void Start() {
         busy += std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
         total += double(frames) / audio::kRate;
         if (total >= 5) {
-            LOGI("dsound: mixer %.1f%% of a core (%s)", 100 * busy / total, audio::g_sinc.load() ? "sinc" : "linear");
+            LOGI("dsound: mixer %.1f%% of a core", 100 * busy / total);
             busy = total = 0;
         }
     });
@@ -1013,10 +947,6 @@ BUFFER(SetBufferData, 3) {
 BUFFER(Play, 4) {
     StartEnvelope(v, a[3] & 2);
     g_starts++;
-    if (!v.playing || (a[3] & 2)) {  // no tail of the last sound
-        std::memset(v.hist, 0, sizeof v.hist);
-        v.hist_frame = -1;
-    }
     v.playing = true;
     v.paused = false;
     v.looping = a[3] & 1;
