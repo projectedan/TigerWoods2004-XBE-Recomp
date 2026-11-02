@@ -21,18 +21,38 @@ bool g_tw_full_detail = true;  // [effects] full_detail
 
 namespace {
 
+// the frame inside the TV's safe border, or a split screen's half or quarter of it
+bool Bordered(int32_t x, int32_t y, int32_t w, int32_t h) {
+    return x >= 32 && y >= 16 && x + w <= 608 && y + h <= 464 && (w == 576 || w == 288) && (h == 448 || h == 224);
+}
+
 void Viewport(gpu::Viewport& v) {
-    if (v.x == 32 && v.y == 16 && v.w == 576 && v.h == 448) {
-        v.x = v.y = 0;
-        v.w = 640;
-        v.h = 480;
-    }
+    LOG_FIRST(16, "tw: viewport %d %d %d %d", int(v.x), int(v.y), int(v.w), int(v.h));
+    if (!Bordered(int32_t(v.x), int32_t(v.y), int32_t(v.w), int32_t(v.h))) return;
+    // what meets the border goes out to the screen's edge; where two views meet stays
+    uint32_t right = v.x + v.w, bottom = v.y + v.h;
+    if (v.x == 32) v.x = 0;
+    if (v.y == 16) v.y = 0;
+    if (right == 608) right = 640;
+    if (bottom == 464) bottom = 480;
+    v.w = right - v.x;
+    v.h = bottom - v.y;
 }
 
 // the same border as a scissor rectangle, which the golfer and other late draws keep: they would stop short of the edge
 bool Scissor(int32_t x1, int32_t y1, int32_t x2, int32_t y2) {
     LOG_FIRST(6, "tw: scissor %d %d %d %d", x1, y1, x2, y2);
-    return x1 == 32 && y1 == 16 && x2 == 608 && y2 == 464;
+    return Bordered(x1, y1, x2 - x1, y2 - y1);
+}
+
+// a rectangle within the border, where the console's screen had drawn it: out with the viewport, or the character
+// creator's model stops short of the footer it reached on the console
+void ScissorMap(uint32_t* r) {
+    if (r[0] < 32 || r[1] < 16 || r[2] > 608 || r[3] > 464) return;
+    r[0] = (r[0] - 32) * 640 / 576;
+    r[1] = (r[1] - 16) * 480 / 448;
+    r[2] = ((r[2] - 32) * 640 + 575) / 576;
+    r[3] = ((r[3] - 16) * 480 + 447) / 448;
 }
 
 void Projection(float* m) {
@@ -40,6 +60,9 @@ void Projection(float* m) {
     if (!persp || m[0] == 0.0f || m[5] == 0.0f || !app::Widescreen()) return;
     float aspect = std::fabs(m[5] / m[0]);
     if (aspect > 1.25f && aspect < 1.4f) m[0] *= aspect / app::FrameAspect();
+    // a split screen's views, side by side or stacked
+    else if (aspect > 0.6f && aspect < 0.72f) m[0] *= aspect / (app::FrameAspect() / 2);
+    else if (aspect > 2.5f && aspect < 2.8f) m[0] *= aspect / (app::FrameAspect() * 2);
 }
 
 // 2D through an orthographic projection: held at 4:3, what covers the screen (fades) stays full
@@ -68,7 +91,17 @@ bool Place(const gpu::State&, float x0, float x1, float y0, float y1, float& a, 
     bool header = now - logo <= 2 && y0 > 0.6f;  // (the strip along the foot keeps to the corners)
     // the panels over the strip's right end, the hint and the caddy's tip, go with it whole
     bool panel = x0 > 0.2f && y0 > -0.625f && y1 < -0.3f;
-    if (gpu::g_in_scene && (strip || panel) && !crossing && !marker && !header) b = (x0 + x1 < 0 ? -1.0f : 1.0f) * (1 - a);
+    // Stop Ball's panel goes to its side as a whole: its lower edge lies in the strip's height, the rest just above it
+    static float stop[4];
+    static uint64_t stop_frame = 0;
+    bool plate = std::fabs(wide - 0.649f) < 0.01f, part = plate;
+    if (plate && std::fabs(high - 0.079f) < 0.01f) {
+        stop[0] = x0, stop[1] = x1, stop[2] = y0, stop[3] = y1;
+        stop_frame = now;
+    }
+    part = part || (stop_frame == now && across > stop[0] && across < stop[1] && up > stop[2] - 0.02f && up < stop[3] + 0.02f);
+    if (gpu::g_in_scene && part) b = (x0 + x1 < 0 ? -1.0f : 1.0f) * (1 - a);
+    else if (gpu::g_in_scene && (strip || panel) && !crossing && !marker && !header) b = (x0 + x1 < 0 ? -1.0f : 1.0f) * (1 - a);
     // the main menu's content goes to the left edge: known by its swoosh, whose size holds as it slides in. Every piece
     // moves with it, wherever it has slid to; the backgrounds, wider, stay, as do the golfer and the Select prompt
     static uint64_t swoosh = 0;
@@ -91,8 +124,9 @@ bool Place(const gpu::State&, float x0, float x1, float y0, float y1, float& a, 
             b = 0;
         }
     }
-    // the tab row's outer plates: their inner ends stay where they fade the labels, their outer ends reach the screen's
-    if (frame - logo <= 2 && y0 > 0.6f && y0 <= 0.65f && (x0 < -1.1f || x1 > 1.1f) &&
+    // the tab row's outer plates, and the second row's below it on some screens: their inner ends stay where they fade
+    // the labels, their outer ends reach the screen's
+    if (frame - logo <= 2 && y0 > 0.45f && y0 <= 0.65f && y1 - y0 < 0.12f && (x0 < -1.1f || x1 > 1.1f) &&
         x1 - x0 < 1) {
         bool left = x0 < 0;
         float inner = left ? x1 : x0, outer = left ? x0 : x1, at = a * inner, edge = left ? -1.01f : 1.01f;
@@ -143,7 +177,7 @@ void TW_TrailSource(X86Context& ctx, uint8_t* base) {
 void TW_GlyphsStart();  // tw_glyphs.cpp
 
 bool g_tw_bloom = true, g_tw_focus = true, g_tw_ao = true;
-float g_tw_bloom_amount = 0.5f;
+float g_tw_bloom_amount = 0.5f, g_tw_focus_amount = 0.1f;
 
 // each object's level of detail (0x75DC0): by its distance it gets a level (+0x1D), the next one it dissolves into
 // (+0x1E) and how far through that it is (+0x20), so trees flanking a course cross over in sight. All kept at the first
@@ -158,7 +192,7 @@ void TW_ObjectDetail(X86Context& ctx, uint8_t* base) {
 
 void TW_ApplyScene() {
     gpu::g_bloom_glow = g_tw_bloom_amount * 1.6f;
-    gpu::g_focus_blur = 0.05f * 0.016f;
+    gpu::g_focus_blur = g_tw_focus_amount * 0.008f;  // 10% the strength chosen
     gpu::g_ao_strength = 0.35f * 3;
     gpu::g_scene_pass = (g_tw_bloom ? 2 : 0) | (g_tw_focus ? 4 : 0) | (g_tw_ao ? 16 : 0);
 }
@@ -171,6 +205,7 @@ void TW_Window(void*) {
     TW_TextScan();
     gpu::g_viewport_hook = Viewport;
     gpu::g_scissor_hook = Scissor;
+    gpu::g_scissor_map = ScissorMap;
     if (const char* e = std::getenv("TW_FULL_DETAIL")) g_tw_full_detail = std::atoi(e) != 0;  // testing
     const char* pass = std::getenv("TW_SCENE_PASS");  // testing: start in that view
     TW_ApplyScene();

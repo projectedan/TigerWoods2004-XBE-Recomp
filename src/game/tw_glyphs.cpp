@@ -26,12 +26,12 @@ constexpr uint32_t kSize = 64, kBigger = 4;
 constexpr int kStylePlayStation = 1, kStyleKeyboard = 3;
 constexpr float kRoot = 0.70710678f;
 
-enum class Button { A, B, X, Y, Black };
+enum class Button { A, B, X, Y, Black, White };
 struct Place {
     float x, y, wide, high;  // middle and half sizes, in the game's texels
 };
 constexpr Place kUpperLeft{15.5f, 16.0f, 11, 13.5f}, kUpperRight{47.5f, 15.5f, 11, 11}, kLowerLeft{15.5f, 47.5f, 14, 14},
-                kLowerRight{47.5f, 47.5f, 10, 10};
+                kLowerRight{47.5f, 47.5f, 10, 10}, kWhiteBall{47.5f, 15.5f, 10, 10};
 
 float Cover(float distance) { return std::clamp(0.5f - distance * float(kBigger), 0.0f, 1.0f); }
 
@@ -137,7 +137,8 @@ void Draw(uint8_t* out, uint32_t W, const Place& at, Button b, bool playstation)
     float tall = at.high / at.wide, r = at.wide;  // some of the game's are stretched, as they are drawn narrowed
     Colour face, ink;
     Look(b, playstation, face, ink);
-    uint32_t source = app::Get().buttons[4];  // what plays the black button: input::kSources, its shoulders and triggers
+    // what plays the black or white button: input::kSources, its shoulders and triggers
+    uint32_t source = app::Get().buttons[b == Button::White ? 5 : 4];
     for (int y = y0; y < y1; y++)
         for (int x = x0; x < x1; x++) {
             uint8_t* p = out + (size_t(y) * W + size_t(x)) * 4;
@@ -148,7 +149,7 @@ void Draw(uint8_t* out, uint32_t W, const Place& at, Button b, bool playstation)
             Over(p, kRimColour, Cover(d - r));
             Over(p, shaded, Cover(d - (r - kRim)));
             float ux = tx / r, uy = ty / r, mark = 1e9f;
-            if (b == Button::Black) {
+            if (b == Button::Black || b == Button::White) {
                 mark = Name(ux, uy, source & 1, source == 6 || source == 7, playstation);
             } else {
                 mark = playstation ? Symbol(ux, uy, b) : Letter(ux, uy, b);
@@ -266,14 +267,39 @@ Patch Measure(const std::vector<uint8_t>& rgba, uint32_t x0, uint32_t y0) {
     return out;
 }
 
+// the sheets keep a clear cross between their four buttons, and the button's own size; a leaf texture, as green as the
+// A, has neither
+bool Sheet(const std::vector<uint8_t>& rgba) {
+    constexpr uint32_t kFirst = 30, kLast = 33;
+    constexpr int kSolid = 100;
+    for (uint32_t i = 0; i < kSize; i++)
+        for (uint32_t j = kFirst; j <= kLast; j++)
+            if (rgba[(size_t(j) * kSize + i) * 4 + 3] > kSolid || rgba[(size_t(i) * kSize + j) * 4 + 3] > kSolid) return false;
+    return true;
+}
+
+// the sheets of the white and black buttons: the ball top right, a dark plate top left. Their other pictures cross
+// Sheet's clear cross
+bool WhiteSheet(const Patch& plate, const Patch& ball, const std::vector<uint8_t>& rgba) {
+    constexpr int kBallLeast = 300, kBallMost = 360, kPlateLeast = 380, kPlateMost = 480, kSolid = 100;
+    constexpr float kBright = 140, kDark = 110, kBlackBall = 70, kGrey = 12;
+    auto grey = [](const Patch& p) { return std::fabs(p.r - p.g) < kGrey && std::fabs(p.g - p.b) < kGrey; };
+    auto alpha = [&](uint32_t x, uint32_t y) { return rgba[(size_t(y) * kSize + x) * 4 + 3]; };
+    return ball.drawn >= kBallLeast && ball.drawn <= kBallMost && (ball.r > kBright || ball.r < kBlackBall) && grey(ball) && plate.drawn >= kPlateLeast &&
+           plate.drawn <= kPlateMost && plate.r < kDark && grey(plate) && alpha(47, 15) > kSolid && alpha(34, 2) <= kSolid && alpha(61, 29) <= kSolid;
+}
+
 bool Styled(const std::vector<uint8_t>& rgba, uint32_t w, uint32_t h, int style, gpu::pack::Image& out) {
     constexpr int kButton = 250;
     constexpr float kColoured = 30, kBlackMost = 80, kGreenish = 6;
+    constexpr int kUpperRightMost = 440;
     if (w != kSize || h != kSize) return false;
     Patch ul = Measure(rgba, 0, 0), ur = Measure(rgba, 32, 0), ll = Measure(rgba, 0, 32), lr = Measure(rgba, 32, 32);
+    bool white = WhiteSheet(ul, ur, rgba);
+    if (!white && !Sheet(rgba)) return false;
     bool green = ur.drawn > kButton && ur.g > ur.r + kColoured && ur.g > ur.b + kColoured;
     bool red = ur.drawn > kButton && ur.r > ur.g + kColoured && ur.r > ur.b + kColoured;
-    if (!green && !red) return false;
+    if (!white && ((!green && !red) || ur.drawn > kUpperRightMost)) return false;
     if (style < 0) return true;
     bool playstation = style == kStylePlayStation, keyboard = style == kStyleKeyboard;
     uint32_t W = w * kBigger, H = h * kBigger;
@@ -282,14 +308,20 @@ bool Styled(const std::vector<uint8_t>& rgba, uint32_t w, uint32_t h, int style,
         for (uint32_t x = 0; x < W; x++)
             std::copy_n(rgba.data() + (size_t(y / kBigger) * w + x / kBigger) * 4, 4, big.data() + (size_t(y) * W + x) * 4);
     auto put = [&](const Place& at, Button b) {
-        static constexpr keys::Action kKeys[] = {keys::kA, keys::kB, keys::kX, keys::kY, keys::kBlack};
+        static constexpr keys::Action kKeys[] = {keys::kA, keys::kB, keys::kX, keys::kY, keys::kBlack, keys::kWhite};
         if (keyboard) DrawKey(big.data(), W, at, kKeys[int(b)]);
         else Draw(big.data(), W, at, b, playstation);
     };
-    put(kUpperRight, green ? Button::A : Button::B);
-    if (ul.drawn > kButton) put(kUpperLeft, ul.g > ul.r + kGreenish ? Button::Y : Button::X);
-    if (ll.drawn > kButton && ll.g > ll.r + kColoured) put(kLowerLeft, Button::A);  // the A on teal
-    if (lr.drawn > kButton && lr.r < kBlackMost) put(kLowerRight, Button::Black);
+    if (white) {
+        put(kWhiteBall, ur.r > 100 ? Button::White : Button::Black);
+    } else {
+        // yellow passes as red too, which has little more green than blue
+        bool yellow = red && ur.g > ur.b + kColoured;
+        put(kUpperRight, green ? Button::A : yellow ? Button::Y : Button::B);
+    }
+    if (!white && ul.drawn > kButton) put(kUpperLeft, ul.g > ul.r + kGreenish ? Button::Y : Button::X);
+    if (!white && ll.drawn > kButton && ll.g > ll.r + kColoured) put(kLowerLeft, Button::A);  // the A on teal
+    if (!white && lr.drawn > kButton && lr.r < kBlackMost) put(kLowerRight, Button::Black);
     out = {};
     out.width = W;
     out.height = H;

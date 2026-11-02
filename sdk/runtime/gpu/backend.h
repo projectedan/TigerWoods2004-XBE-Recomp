@@ -146,6 +146,9 @@ inline std::atomic<uint64_t> g_render_mask{0};
 // set by a game: a scissor rectangle (x1, y1, x2, y2) the game sets; true drops it. Null for none.
 using ScissorHook = bool (*)(int32_t x1, int32_t y1, int32_t x2, int32_t y2);
 inline ScissorHook g_scissor_hook = nullptr;
+// set by a game: changes a scissor rectangle kept, x1, y1, x2, y2. Null for none.
+using ScissorMap = void (*)(uint32_t* rect);
+inline ScissorMap g_scissor_map = nullptr;
 // set by a game whose vertex programs carry their own projection: their 3D positions' x times this (4:3 / the frame's
 // shape for widescreen), 0 to leave them; fixed function projections go through g_projection_hook instead
 inline std::atomic<float> g_program_widen{0.0f};

@@ -578,7 +578,7 @@ private:
     ID3D12PipelineState* EnsurePassPipeline(const char* hlsl, const char* entry, DXGI_FORMAT rtv, float blend);
     // Draw, in call order, each callee right after its caller
     void ScenePass(const State& s);
-    void RunScenePass();
+    void RunScenePass(bool frame_end = false);
     bool DepthCopy(const State& s);
     bool DepthCopyCheck(const State& s);
     ID3D12PipelineState* EnsureDepthCopyPipeline();
@@ -745,6 +745,9 @@ private:
     uint64_t fence_value_ = 0;
     Frame frames_[kFrames];
     uint64_t frame_ = 0;
+    // a split screen: the second view's clear comes within the frame. One pass takes both, so it waits for that view
+    uint64_t view_clear_frame_ = ~0ull;
+    bool split_ = false;
     uint64_t scene_frame_ = ~0ull, scene_done_ = ~0ull;  // the frame scene_draws_ counts, the last with its pass
     uint32_t scene_draws_ = 0;
     Surface scene_rt_{}, scene_zs_{};  // what those draws went to
@@ -2575,8 +2578,9 @@ void D3D12Backend::ScenePass(const State& s) {
     RunScenePass();
 }
 
-void D3D12Backend::RunScenePass() {
+void D3D12Backend::RunScenePass(bool frame_end) {
     if (!g_scene_pass.load(std::memory_order_relaxed)) return;
+    if (split_ && view_clear_frame_ != frame_ && !frame_end) return;
     if (scene_done_ == frame_ || scene_frame_ != frame_ || scene_draws_ < kSceneMinDraws) return;
     Target* rt = FindTarget(scene_rt_, false);
     Target* ds = FindTarget(scene_zs_, true);
@@ -2589,6 +2593,8 @@ void D3D12Backend::RunScenePass() {
     Transition(rt->res.Get(), rt->state, D3D12_RESOURCE_STATE_RENDER_TARGET);
     ResWritten(*rt);
     int on = g_scene_pass.load();
+    // no bloom over two views: it would run over what the game adds last, as the rings round the ball
+    if (split_ || view_clear_frame_ == frame_) on &= ~2;
     bool occlude = (on & (16 | 32)) && !free_rtv_.empty();
     if (occlude && ao_ && (ao_->GetDesc().Width != rt->w || ao_->GetDesc().Height != rt->h)) {
         CurrentFrame().garbage.push_back(ao_);  // the size changed; the GPU may still read the old one
@@ -3651,7 +3657,9 @@ void D3D12Backend::UploadConstants(const State& s, const DrawShaders& sh, const 
     c.surf[3] = k.a2c ? 1.0f : 0.0f;
     FillFogConstants(s, sh.prog, c);
     FillCombinerConstants(s, c);
-    c.widen[0] = sh.prog && s.viewport.w >= 640 ? g_program_widen.load() : 0.0f;  // not a pass into a corner of the target
+    // about the view's middle: a split screen's half of the frame has its own
+    c.widen[0] = sh.prog && (s.viewport.w >= 640 || s.viewport.w == 320) ? g_program_widen.load() : 0.0f;
+    c.widen[1] = (float(s.viewport.x) + float(s.viewport.w) / 2) / 320.0f - 1.0f;  // not a pass into a corner of the target
     if (g_orbit_on.load()) {
         c.orbit[0][0] = 1.0f;
         c.orbit[0][1] = g_orbit_yaw.load();
@@ -4335,7 +4343,9 @@ void D3D12Backend::Clear(const State& s, uint32_t count, const uint8_t* rects, u
     FlushBatch();
     // depth wiped within the frame (the ball's spin picture): the scene pass first, as it reads that depth. The sun's
     // test usually brings it on sooner, but a course may have no sun, and its picture would stand as a square of no haze
-    if ((flags & kClearZ) && s.zs.data == scene_zs_.data) RunScenePass();
+    bool views = (flags & kClearTarget) && (flags & kClearZ) && scene_frame_ == frame_ && s.zs.data == scene_zs_.data;
+    if (views) view_clear_frame_ = frame_;
+    else if ((flags & kClearZ) && s.zs.data == scene_zs_.data) RunScenePass();
     PerfScope perf_clear{g_perf.clear};
     if (cap_) {
         CapStep(s.rt);
@@ -5313,7 +5323,8 @@ void D3D12Backend::Present(const Surface& front) {
     g_wait_display = WaitDisplayBlank;
     FlushBatch();
     PerfScope perf_present{g_perf.present};
-    RunScenePass();
+    RunScenePass(true);
+    split_ = view_clear_frame_ == frame_;
     if (cap_) {
         FinishCapture(front);
     } else if (CaptureOn() && (g_capture.exchange(false) || AutoCaptureDue())) {

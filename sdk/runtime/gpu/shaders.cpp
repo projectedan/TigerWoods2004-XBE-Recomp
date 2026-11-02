@@ -247,7 +247,7 @@ const char* kVsEpilogue = R"(
     // frame's shape about the middle (g_program_widen); 2D and full-screen passes (w exactly 1) left. The test was
     // |w - 1| > 0.001: the vertices of a 3D model whose depth fell in that band were left wide while the rest
     // narrowed, so characters burst into spikes in The Third Age's cutscenes (GitHub #37)
-    if (widen.x != 0 && !is2d) q.x *= widen.x;
+    if (widen.x != 0 && !is2d) q.x = widen.y + (q.x - widen.y) * widen.x;
     q.y = 1 - p.y * 2 / surf.y;
     q.z = p.z * surf.z;
     q.xyz *= p.w;

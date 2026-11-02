@@ -928,6 +928,8 @@ HLE_STDCALL(D3DDevice_SetScissors, 3) {
     DeviceLock lock;
     g_state.scissor_count = std::min<uint32_t>(a[0], 8);
     for (uint32_t i = 0; i < g_state.scissor_count * 4; i++) g_state.scissors[i] = R32(a[2] + i * 4);
+    if (gpu::g_scissor_map)
+        for (uint32_t i = 0; i < g_state.scissor_count; i++) gpu::g_scissor_map(&g_state.scissors[i * 4]);
     return 0;
 }
 
