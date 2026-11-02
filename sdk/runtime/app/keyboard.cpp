@@ -198,23 +198,17 @@ void Merge(int port, input::Pad& p) {
         g_aim_x = g_aim_y = 0;
     }
     static bool swinging = false;
-    static int32_t swing_low = 0, swing_high = 0, swing_at = 0;
     if (swing) {
         constexpr float kFullCounts = 1200;  // of the mouse, middle to full tilt, at 100%
         float k = float(s.mouse_sensitivity) / 100.0f / kFullCounts;
         if (swinging) {  // the press itself is the middle: what moved before it does not count
             g_swing_x = std::clamp(g_swing_x + float(dx) * k, -1.0f, 1.0f);
             g_swing_y = std::clamp(g_swing_y - float(dy) * k, -1.0f, 1.0f);
-            swing_at += dy;
-            swing_low = std::min(swing_low, swing_at);
-            swing_high = std::max(swing_high, swing_at);
         }
         swinging = true;
         any = true;
     } else {
-        if (swinging) LOGR("swing: mouse %d counts back, %d forward", swing_high, -swing_low);
         swinging = false;
-        swing_low = swing_high = swing_at = 0;
         g_swing_x = g_swing_y = 0;
     }
     g_active = any;

@@ -6,6 +6,7 @@ title = 0x4541003A
 entry = 0x10E6E2
 xdk = 5558
 out = "generated/game"
+library = "TW2004.dll"  # <exe>.dll, which the executable delay loads
 partitions = 32
 code_sections = [".text", "D3D", "D3DX", "XGRPH", "DSOUND", "WMADEC", "XPP"]
 

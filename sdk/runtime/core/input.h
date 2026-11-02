@@ -26,5 +26,6 @@ bool Connected(int port);
 void Rumble(int port, uint16_t left, uint16_t right);
 // the kind of controller on that port, for button pictures: 0 none or Xbox-like, 1 PlayStation, 2 Nintendo
 int Style(int port);
+uint16_t HeldOnAnyController();  // face buttons as XINPUT_GAMEPAD_A/B/X/Y masks, before the game runs
 
 }  // namespace input

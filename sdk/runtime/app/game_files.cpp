@@ -22,7 +22,6 @@
 #include "xbe/image_hash.h"
 
 extern const char kImageSha1[];  // the xbe recompiled into this executable, written by CMake
-extern const uint64_t kImageSectionsHash;  // its code and data without the certificate, written by xbe_recomp
 
 namespace app {
 
@@ -51,6 +50,8 @@ fs::path FindAssets() {
     return {};
 }
 
+}  // namespace
+
 std::string Sha1(const std::vector<uint8_t>& data) {
     alignas(8) uint8_t ctx[128];
     uint8_t digest[20];
@@ -64,6 +65,8 @@ std::string Sha1(const std::vector<uint8_t>& data) {
     }
     return hex;
 }
+
+namespace {
 
 bool ReadHostFile(const fs::path& path, std::vector<uint8_t>& out) {
     std::ifstream f(path, std::ios::binary);
@@ -137,7 +140,7 @@ bool FindGame(GameFiles& game) {
         bool same_title = !kGame.title_id || tid == kGame.title_id;
         // another copy whose file differs from this build's only outside the code and data (the certificate or
         // signature: another printing, dump or resigning) runs the same
-        bool same_code = !match && same_title && kImageSectionsHash && xbe::SectionsHash(xbe) == kImageSectionsHash;
+        bool same_code = !match && same_title && IMAGE_SECTIONS_HASH && xbe::SectionsHash(xbe) == IMAGE_SECTIONS_HASH;
         if (same_code) {
             LOGR("Game: %s in %s: the same code and data as this build's, another certificate", IMAGE_XBE,
                  name.string().c_str());

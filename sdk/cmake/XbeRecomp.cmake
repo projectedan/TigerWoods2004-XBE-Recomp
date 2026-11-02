@@ -50,6 +50,33 @@ set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 FetchContent_Declare(glslang GIT_REPOSITORY https://github.com/KhronosGroup/glslang.git GIT_TAG 15.4.0 GIT_SHALLOW TRUE)
 FetchContent_MakeAvailable(zydis tomlplusplus imgui SDL3 glslang)
 
+# What the game needs to build its code on the player's PC (runtime/app/game_code.cpp), beside the executables: the
+# recompiler, clang and lld from the toolchain building this, the game's configs, the XDK layouts they include and the
+# headers the generated code includes
+set(XBE_COMPILER_DIR ${CMAKE_BINARY_DIR}/compiler)
+get_filename_component(XBE_LLVM_BIN ${CMAKE_CXX_COMPILER} DIRECTORY)
+file(GLOB XBE_GAME_CONFIGS CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/config/*.toml)
+set(XBE_COMPILER_HEADERS ${XBE_SDK_DIR}/runtime/cpu/x86_ops.h ${XBE_SDK_DIR}/runtime/cpu/x86_context.h)
+file(GLOB XBE_FREESTANDING_HEADERS CONFIGURE_DEPENDS ${XBE_SDK_DIR}/runtime/cpu/freestanding/*)
+file(GLOB XBE_LAYOUTS CONFIGURE_DEPENDS ${XBE_SDK_DIR}/xdk/*/layout.toml)
+set(XBE_COPY_LAYOUTS)
+foreach(layout ${XBE_LAYOUTS})
+    get_filename_component(build_dir ${layout} DIRECTORY)
+    get_filename_component(build ${build_dir} NAME)
+    list(APPEND XBE_COPY_LAYOUTS COMMAND ${CMAKE_COMMAND} -E make_directory ${XBE_COMPILER_DIR}/xdk/${build}
+         COMMAND ${CMAKE_COMMAND} -E copy_if_different ${layout} ${XBE_COMPILER_DIR}/xdk/${build})
+endforeach()
+add_custom_target(compiler_files ALL
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${XBE_COMPILER_DIR}/config ${XBE_COMPILER_DIR}/include/cpu
+            ${XBE_COMPILER_DIR}/include/freestanding
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${XBE_LLVM_BIN}/clang.exe ${XBE_LLVM_BIN}/lld-link.exe
+            ${XBE_SDK_DIR}/tools/LLVM-LICENSE.txt ${XBE_COMPILER_DIR}
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${XBE_GAME_CONFIGS} ${XBE_COMPILER_DIR}/config
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${XBE_COMPILER_HEADERS} ${XBE_COMPILER_DIR}/include/cpu
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${XBE_FREESTANDING_HEADERS} ${XBE_COMPILER_DIR}/include/freestanding
+    ${XBE_COPY_LAYOUTS}
+    VERBATIM)
+
 # Cross-compiling (an ARM64 build on an x64 PC): the tools must run on this machine, so they come from a build
 # for it, XBE_HOST_TOOLS = the folder holding its xbe_recomp and xbe_symbols
 set(XBE_PGO "" CACHE STRING "Profile-guided optimisation: GEN (a measuring build), OFF, or empty (use pgo/<target>.profdata when there)")
@@ -63,6 +90,7 @@ else()
     # x86 to C++ recompiler
     file(GLOB XBE_RECOMP_SOURCES CONFIGURE_DEPENDS ${XBE_SDK_DIR}/tools/recomp/*.cpp)
     add_executable(xbe_recomp ${XBE_RECOMP_SOURCES})
+    set_target_properties(xbe_recomp PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${XBE_COMPILER_DIR})
     target_include_directories(xbe_recomp PRIVATE ${XBE_SDK_DIR}/runtime ${XBE_SDK_DIR}/tools/recomp)
     target_compile_definitions(xbe_recomp PRIVATE _CRT_SECURE_NO_WARNINGS)
     target_link_libraries(xbe_recomp PRIVATE Zydis tomlplusplus::tomlplusplus)
@@ -101,8 +129,11 @@ set_source_files_properties(${XBE_SDK_DIR}/runtime/core/input.cpp PROPERTIES INC
 # glslang's headers likewise go to spirv.cpp alone (the kit records only the include folders of the recompiled code)
 set_source_files_properties(${XBE_SDK_DIR}/runtime/gpu/spirv.cpp PROPERTIES INCLUDE_DIRECTORIES "${glslang_SOURCE_DIR}")
 
-# One executable per recompiled image: its code from config/<config> (partitions as that config sets them),
-# the SDK runtime, XBE_HOST_SOURCES shared by every image of the game, and src/<game_dir> hooks only this image has.
+# One executable per recompiled image: the SDK runtime, XBE_HOST_SOURCES shared by every image of the game, and
+# src/<game_dir> hooks only this image has. The image's code goes to <target>.dll beside it, which the executable delay
+# loads: built here from config/<config> (partitions as that config sets them, library = "<target>.dll"), while a
+# release leaves it out and the executable builds it from the player's xbe (runtime/app/game_code.cpp, which compiles
+# with the same flags).
 # Expects assets/<xbe> and the config's out = "generated/<game_dir>". At run time the game may be a disc image instead.
 function(add_xbe_image target xbe config partitions game_dir)
     set(GEN ${CMAKE_CURRENT_SOURCE_DIR}/generated/${game_dir})
@@ -114,8 +145,10 @@ function(add_xbe_image target xbe config partitions game_dir)
     file(GLOB configs CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/config/*.toml ${XBE_SDK_DIR}/xdk/*/*.toml)
     add_custom_command(
         OUTPUT ${GEN}/codegen.stamp
-        BYPRODUCTS ${GEN_SOURCES} ${GEN}/x86_recomp_shared.h ${GEN}/image_symbols.h
+        BYPRODUCTS ${GEN_SOURCES} ${GEN}/x86_recomp_shared.h ${GEN}/image_symbols.h ${GEN}/hook_exports.h
+                   ${GEN}/exports.def ${GEN}/imports.def ${GEN}/code.lib
         COMMAND xbe_recomp config/${config} --xdk ${XBE_SDK_DIR}/xdk
+        COMMAND ${XBE_LLVM_BIN}/lld-link.exe /lib /machine:x64 /def:${GEN}/imports.def /out:${GEN}/code.lib
         COMMAND ${CMAKE_COMMAND} -E touch ${GEN}/codegen.stamp
         DEPENDS xbe_recomp ${configs} ${CMAKE_CURRENT_SOURCE_DIR}/assets/${xbe}
         WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
@@ -147,8 +180,10 @@ function(add_xbe_image target xbe config partitions game_dir)
     endif()
     file(CONFIGURE OUTPUT ${XBE_RC} CONTENT "${rc}")
     set_property(SOURCE ${XBE_RC} APPEND PROPERTY OBJECT_DEPENDS ${XBE_SDK_DIR}/runtime/app/app.manifest)
-    add_executable(${target} WIN32 ${XBE_RUNTIME_SOURCES} ${XBE_HOST_SOURCES} ${GAME_SOURCES} ${GEN_SOURCES} ${XBE_IMGUI_SOURCES} ${XBE_HASH} ${XBE_RC})
-    add_dependencies(${target} recompile_${target})
+    add_executable(${target} WIN32 ${XBE_RUNTIME_SOURCES} ${XBE_HOST_SOURCES} ${GAME_SOURCES} ${XBE_IMGUI_SOURCES} ${XBE_HASH} ${XBE_RC})
+    add_dependencies(${target} recompile_${target} compiler_files)
+    # the import library of what the executable exports to its DLL goes to the compiler folder
+    set_target_properties(${target} PROPERTIES ENABLE_EXPORTS ON ARCHIVE_OUTPUT_DIRECTORY ${XBE_COMPILER_DIR})
     target_include_directories(${target} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src ${XBE_SDK_DIR}/runtime ${GEN})
     target_include_directories(${target} SYSTEM PRIVATE ${imgui_SOURCE_DIR} ${XBE_SDK_DIR}/third_party/vulkan/include)
     target_compile_options(${target} PRIVATE -fno-strict-aliasing)
@@ -173,6 +208,23 @@ target_link_libraries(${target} PRIVATE tomlplusplus::tomlplusplus $<LINK_ONLY:S
         $<LINK_ONLY:glslang::glslang> $<LINK_ONLY:glslang::SPIRV> $<LINK_ONLY:glslang::glslang-default-resource-limits> d3d12 dxgi dxguid d3dcompiler ${xaudio} ole32 windowscodecs dbghelp winmm dwmapi ws2_32 ${extra})
     # lld keeps the recompiled weak functions overridable by the host ones
     target_link_options(${target} PRIVATE -fuse-ld=lld -g)
+    target_link_libraries(${target} PRIVATE ${GEN}/code.lib delayimp)
+    target_link_options(${target} PRIVATE -Wl,/delayload:${target}.dll)
+
+    # without a C runtime: the executable passes on what the code calls
+    add_library(${target}_code SHARED ${GEN_SOURCES})
+    set_target_properties(${target}_code PROPERTIES OUTPUT_NAME ${target} CXX_EXTENSIONS OFF)
+    add_dependencies(${target}_code recompile_${target})
+    target_include_directories(${target}_code PRIVATE ${XBE_SDK_DIR}/runtime ${GEN})
+    target_include_directories(${target}_code SYSTEM PRIVATE ${XBE_SDK_DIR}/runtime/cpu/freestanding)
+    target_compile_definitions(${target}_code PRIVATE X86_GAME_CODE)
+    target_compile_options(${target}_code PRIVATE -fms-compatibility-version=19.40 -nostdinc -nostdinc++ -w)
+    target_link_libraries(${target}_code PRIVATE ${target})
+    target_link_options(${target}_code PRIVATE -fuse-ld=lld -Wl,/noentry,/nodefaultlib,/opt:noicf
+        -Wl,/def:${GEN}/exports.def)
+    # a stamp from an earlier build on the executable's first start would outrank this DLL
+    add_custom_command(TARGET ${target}_code POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E rm -f ${XBE_COMPILER_DIR}/work/${target}/built.txt)
     # profile-guided optimisation (clang): XBE_PGO=GEN builds a measuring program (it writes <target>-<pid>.profraw,
     # LLVM_PROFILE_FILE to choose); with pgo/<target>.profdata beside the port (llvm-profdata merge of those) and
     # XBE_PGO not OFF/GEN, the build uses it. The kit carries the profile, so a player's build uses it too.

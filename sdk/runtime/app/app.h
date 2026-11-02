@@ -188,6 +188,10 @@ struct GameFiles {
     std::vector<uint8_t> xbe;
 };
 bool FindGame(GameFiles& game);
+std::string Sha1(const std::vector<uint8_t>& data);  // lower case hex
+// a release ships no game code: the first start builds it into <exe>.dll from the player's xbe, then this loads it;
+// false when it could not be, the player has been told why (game_code.cpp)
+bool PrepareGameCode(const GameFiles& game);
 int Instance();  // Args().instance
 void* Window();  // HWND
 // boot splash: GameInfo::splash .bmp or .png beside the exe, up before the game window

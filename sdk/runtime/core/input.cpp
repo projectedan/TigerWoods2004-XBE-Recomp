@@ -208,6 +208,19 @@ void Rumble(int port, uint16_t left, uint16_t right) {
     if (port >= 0 && port < 4 && g_pads[port]) SDL_RumbleGamepad(g_pads[port], left, right, 0);
 }
 
+uint16_t HeldOnAnyController() {
+    constexpr std::pair<SDL_GamepadButton, uint16_t> kFaceButtons[] = {
+        {SDL_GAMEPAD_BUTTON_SOUTH, 0x1000}, {SDL_GAMEPAD_BUTTON_EAST, 0x2000},
+        {SDL_GAMEPAD_BUTTON_WEST, 0x4000},  {SDL_GAMEPAD_BUTTON_NORTH, 0x8000}};
+    std::lock_guard lock(g_lock);
+    UpdatePads();
+    uint16_t held = 0;
+    for (SDL_Gamepad* pad : g_pads)
+        for (auto [button, mask] : kFaceButtons)
+            if (pad && SDL_GetGamepadButton(pad, button)) held |= mask;
+    return held;
+}
+
 int Style(int port) {
     std::lock_guard lock(g_lock);
     if (port < 0 || port >= 4 || !g_pads[port]) return 0;

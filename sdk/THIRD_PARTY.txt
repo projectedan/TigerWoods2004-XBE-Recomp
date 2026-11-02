@@ -124,4 +124,7 @@ or (at your option) any later version. The executable that contains them is dist
 License, version 3. The licence texts and the source are at https://github.com/xemu-project/xemu and in the source of
 this program.
 
+compiler/clang.exe and compiler/lld-link.exe (a release): LLVM's Clang and LLD, Apache License 2.0 with LLVM exceptions
+(compiler/LLVM-LICENSE.txt), which build the game's code on the player's PC.
+
 third_party/fonts/archivoblack: Archivo Black, SIL Open Font License 1.1 (OFL.txt beside it), the port's menu

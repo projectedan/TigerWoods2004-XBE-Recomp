@@ -16,6 +16,8 @@
 void TW_MenuUi();                  // tw_menu.cpp
 bool TW_MenuKey(uintptr_t key);
 void TW_MenuToggle();
+bool TW_MenuOpen();
+void TW_GlyphsKey();
 
 namespace {
 std::chrono::steady_clock::time_point g_shown, g_movie_seen;
@@ -25,6 +27,11 @@ const char* g_label = "";
 bool TW_Message(void*, uint32_t msg, uintptr_t wp, intptr_t lp, intptr_t*) {
     constexpr uint32_t kKeyDown = 0x100;
     constexpr uintptr_t kF9 = 0x78, kF1 = 0x70;
+    constexpr uint32_t kLeftDown = 0x201, kRightDown = 0x204, kMiddleDown = 0x207;
+    // any key or click at the quick menu, F1 opening it among them, says the keyboard and mouse are in use: the keys'
+    // own read sees none of these while it is open
+    bool pressed = msg == kKeyDown || msg == kLeftDown || msg == kRightDown || msg == kMiddleDown;
+    if (pressed && (TW_MenuOpen() || wp == kF1)) TW_GlyphsKey();
     if (msg == kKeyDown && wp == kF1) {
         if (!(lp & (1 << 30))) TW_MenuToggle();
         return true;
