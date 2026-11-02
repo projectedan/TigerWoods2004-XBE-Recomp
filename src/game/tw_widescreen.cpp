@@ -88,6 +88,15 @@ bool Place(const gpu::State&, float x0, float x1, float y0, float y1, float& a, 
         caddy_frame = gpu::g_frame_no;
         caddy_box[0] = x0; caddy_box[1] = x1; caddy_box[2] = y0; caddy_box[3] = y1;
     }
+    // Record notifications (Longest Drive and similar): recognise their background
+    // before the title, borders and text, so every piece follows one right anchor.
+    static uint64_t record_frame = ~uint64_t(0);
+    static float record_box[4];
+    if (x0 > 0 && y0 > 0.3f && y1 < 0.85f &&
+        std::fabs(x1 - x0 - 0.938f) < 0.006f && std::fabs(y1 - y0 - 0.224f) < 0.006f) {
+        record_frame = gpu::g_frame_no;
+        record_box[0] = x0; record_box[1] = x1; record_box[2] = y0; record_box[3] = y1;
+    }
     // on the course the HUD goes to the corners: its top and bottom strips, each already a left or a right piece, their
     // ends (the plates behind the bars, at 1) on the screen's edges as on the console; the bars run past them.
     // What crosses the middle (messages) and what lies between the strips (the marker, which follows the course) stays
@@ -159,6 +168,10 @@ bool Place(const gpu::State&, float x0, float x1, float y0, float y1, float& a, 
             x1 <= caddy_box[1] + 0.01f && y0 >= caddy_box[2] - 0.02f && y1 <= caddy_box[3] + 0.02f)
             b = 1 - a;
     }
+    if (gpu::g_in_scene &&
+        record_frame == gpu::g_frame_no && x0 >= record_box[0] - 0.01f &&
+        x1 <= record_box[1] + 0.01f && y0 >= record_box[2] - 0.02f && y1 <= record_box[3] + 0.02f)
+        b = 1 - a;
     return true;
 }
 
