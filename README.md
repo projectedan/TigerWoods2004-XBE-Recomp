@@ -22,18 +22,22 @@ This port was created using the [Xbox XBE Recomp](https://github.com/TGP482/Xbox
 ### Quick Menu
 Press **F1**, or **Back + Start** on a controller, to open it over the game. Changes apply at once and are saved.
 
+![Quick Menu showing display settings](docs/images/quick-menu.png)
+
 - **Display** - Window mode, resolution scaling (classic, desktop, 2x and 3x), anti-aliasing (SMAA or 2x MSAA), texture filtering up to 16x, V-Sync, button prompts and full detail trees.
 - **Effects** - Bloom and depth of field.
 - **Controls** - Controller and keyboard and mouse diagrams, matching what you last used.
 
 ### Display
-- **Widescreen** - The 3D picture fills the screen, with the HUD and menus laid out for the wider frame.
+- **Widescreen** - The 3D picture fills the screen, with the HUD and menus laid out for the wider frame, including the intro Play Now lesson panels and controller diagram.
 - **Splitscreen** - Split views fill the screen.
 - **Frame pacing** - Frames follow a steady timer, off the game's own processor core.
 
 ### Graphics
 - **Effects** - Bloom and depth of field, each of which can be turned off. Bloom is off in splitscreen.
 - **Full detail trees** - Trees keep their full model at any distance, without level of detail changes.
+- **Putting grid** - Grid lines keep their original thickness at higher rendering resolutions.
+- **MSAA** - Bloom and MSAA work together without white screens during camera cuts.
 - **Fixes** - Corrected distance fog, the ball's flight trail, the putting line and the shot preview. The sun's flare holds steady, without the frame to frame shimmer that made the sky crawl.
 
 ### Audio
@@ -64,12 +68,13 @@ Prompts are redrawn at higher resolution for Xbox and PlayStation controllers an
   - Windows 10 64-bit
 - **GPU** with support for Direct3D 12
 
+Also tested on a BC250 running SteamOS through Proton. Steam Deck and other Linux hardware have not been tested.
+
 ## Known Issues
 
 - The mouse swing has a short delay as you start to drag.
 - Left click moves the selection in the game's menus while held.
 - The menu song has occasional faint clicks. They are in the game's own audio data.
-- Not yet tested on Linux or Steam Deck through Proton.
 
 ## Building
 
@@ -92,6 +97,7 @@ Run `build.bat`. The first build recompiles the game and takes a while. The exe 
 - [XenonRecomp](https://github.com/hedge-dev/XenonRecomp) for the overridable function layout and instruction hooks.
 - [Zydis](https://github.com/zyantific/zydis) for decoding x86 instructions, [toml++](https://github.com/marzer/tomlplusplus) for the configs, [Dear ImGui](https://github.com/ocornut/imgui) for the menus and [SDL](https://github.com/libsdl-org/SDL) for controllers.
 - [LLVM](https://llvm.org)'s Clang and LLD, which build the game's code on your PC.
+- [glslang](https://github.com/KhronosGroup/glslang) for HLSL/SPIR-V compilation and [Vulkan headers](https://github.com/KhronosGroup/Vulkan-Headers) for the Vulkan interface.
 - [SMAA](https://github.com/iryoku/smaa) by Jorge Jimenez and others for the SMAA anti-aliasing option.
 - [Archivo Black](https://github.com/Omnibus-Type/ArchivoBlack) (SIL Open Font License) for the quick menu.
 - [xemu](https://github.com/xemu-project/xemu)'s DSP56300 interpreter and DSP DMA unit, which run the game's own audio effects (`sdk/third_party/xemu-dsp`).
@@ -102,3 +108,5 @@ Tiger Woods PGA Tour is a trademark of its owners. This project is unofficial an
 ## License
 
 This port is free software under the [GNU General Public License, version 3](LICENSE). It includes xemu's DSP code (GPL-2.0-or-later and LGPL-2.1-or-later, see `sdk/third_party/xemu-dsp`), so builds that contain it are distributed under the GPL. The SDK in `sdk/` keeps its own MIT licence (`sdk/LICENSE`) for the parts that come from it. No game code or data is included: you supply your own copy of the game.
+
+Third-party notices are in `THIRD_PARTY.txt` and `licenses/` in the release, or `sdk/THIRD_PARTY.txt` and `sdk/licenses/` in this repository.

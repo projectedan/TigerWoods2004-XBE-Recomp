@@ -1,130 +1,94 @@
-Third party software in the executables built with this SDK
+Third-party notices: Tiger Woods PGA Tour 2004 - XBE Recomp
+
+This release contains TW2004.exe and the tools used to build the player's own
+game code at first start. License texts are in licenses/ beside this file;
+in the source repository they are in sdk/licenses/. The port's GNU GPL v3
+license is LICENSE in the release root. No game files or recompiled game code
+are supplied.
+
+Runtime and recompiler
+----------------------
+
+Xbox XBE Recomp (https://github.com/TGP482/XboxXBE-Recomp)
+Recompiler and runtime. MIT; see licenses/Xbox-XBE-Recomp-MIT.txt.
+
+Athelas (https://github.com/Shagg88/Athelas)
+SDK work this port builds on. MIT; see licenses/Athelas-MIT.txt.
+
+Zydis v4.1.1 and Zycore (https://github.com/zyantific/zydis)
+x86 decoding in compiler/xbe_recomp.exe. MIT; see licenses/Zydis-MIT.txt and
+licenses/Zycore-MIT.txt. These notices are copied from the build dependencies.
 
 toml++ v3.4.0 (https://github.com/marzer/tomlplusplus)
-
-MIT License
-
-Copyright (c) Mark Gillard <mark.gillard@outlook.com.au>
-
-Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated
-documentation files (the "Software"), to deal in the Software without restriction, including without limitation the
-rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to
-permit persons to whom the Software is furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all copies or substantial portions of the
-Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE
-WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
-COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
-OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-
+Configuration parsing. MIT; see licenses/tomlplusplus-MIT.txt.
 
 Dear ImGui v1.91.0 (https://github.com/ocornut/imgui)
+Menu rendering. MIT; see licenses/Dear-ImGui-MIT.txt.
 
-The MIT License (MIT)
+SDL v3.4.18 (https://github.com/libsdl-org/SDL)
+Controller input. zlib license; see licenses/SDL-zlib.txt.
 
-Copyright (c) 2014-2024 Omar Cornut
+glslang v15.4.0 (https://github.com/KhronosGroup/glslang)
+HLSL/SPIR-V compilation for the Vulkan renderer. The upstream aggregate
+license and notices are reproduced in full in licenses/glslang-LICENSE.txt.
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+Vulkan headers (https://github.com/KhronosGroup/Vulkan-Headers)
+Vulkan interface definitions. Apache-2.0 and MIT, as marked in the source
+headers; see licenses/Vulkan-Headers-LICENSE.txt and licenses/Apache-2.0.txt.
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+stb_image v2.30 and stb_image_write v1.16
+(https://github.com/nothings/stb)
+Image decoding and encoding. Distributed under their MIT option;
+see licenses/stb-MIT.txt.
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+SMAA (https://github.com/iryoku/smaa)
+Anti-aliasing shader and lookup tables; see licenses/SMAA-LICENSE.txt.
+The embedded shader has comments stripped; its notice is retained here and
+beside the source tables in sdk/runtime/third_party/smaa/.
 
+xemu DSP56300 interpreter and DSP DMA unit
+(https://github.com/xemu-project/xemu, hw/xbox/mcpx/apu/dsp)
+Imported revision: 25e1ee2fd59a451f2ab57e825b4f8a5414220c8b.
+The interpreter is GPL-2.0-or-later; the DMA unit is LGPL-2.1-or-later.
+See licenses/xemu-GPL-2.0.txt and licenses/xemu-LGPL-2.1.txt. Per-file
+copyright notices and adaptation details are retained in sdk/third_party/xemu-dsp/.
+TW2004.exe, which includes this code, is distributed under the GNU GPL v3
+(LICENSE). Its source is in this project's repository:
+https://github.com/projectedan/TigerWoods2004-XBE-Recomp
 
-SDL 3.4.18 (https://github.com/libsdl-org/SDL)
+Fonts and controller artwork
+----------------------------
 
-Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+Archivo Black (https://github.com/Omnibus-Type/ArchivoBlack)
+The port's Quick Menu font. SIL Open Font License 1.1;
+see licenses/ArchivoBlack-OFL.txt.
 
-This software is provided 'as-is', without any express or implied
-warranty.  In no event will the authors be held liable for any damages
-arising from the use of this software.
+Liberation Sans Regular 2.1.5 (https://github.com/liberationfonts/liberation-fonts)
+Font embedded in the SDK's default overlay. SIL Open Font License 1.1;
+see licenses/LiberationSans-OFL.txt.
 
-Permission is granted to anyone to use this software for any purpose,
-including commercial applications, and to alter it and redistribute it
-freely, subject to the following restrictions:
+The controller diagram's proportions follow TheHoodieGuy02's
+8th Gen Console Vector Gamepad Collection (CC0):
+https://opengameart.org/content/8th-gen-console-vector-gamepad-collection
 
-1. The origin of this software must not be misrepresented; you must not
-   claim that you wrote the original software. If you use this software
-   in a product, an acknowledgment in the product documentation would be
-   appreciated but is not required.
-2. Altered source versions must be plainly marked as such, and must not be
-   misrepresented as being the original software.
-3. This notice may not be removed or altered from any source distribution.
+Bundled compiler tools
+----------------------
 
+LLVM Clang and LLD (https://llvm.org)
+compiler/clang.exe and compiler/lld-link.exe compile and link the player's
+game code. Apache License 2.0 with LLVM exceptions;
+the full license is compiler/LLVM-LICENSE.txt.
 
-stb_image v2.30 and stb_image_write v1.16 (https://github.com/nothings/stb, commit 2c980bb5), texture pack PNG files
+Optional graphics interfaces
+----------------------------
 
-MIT License
+AMD FidelityFX SDK API headers
+(https://github.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK)
+MIT; see licenses/AMD-FidelityFX-headers-MIT.txt and sdk/third_party/ffx/.
 
-Copyright (c) 2017 Sean Barrett
+NVIDIA Streamline headers (https://github.com/NVIDIA-RTX/Streamline)
+See licenses/NVIDIA-Streamline-headers-LICENSE.txt and sdk/third_party/streamline/.
 
-Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated
-documentation files (the "Software"), to deal in the Software without restriction, including without limitation the
-rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to
-permit persons to whom the Software is furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all copies or substantial portions of the
-Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE
-WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
-COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
-OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-
-
-Liberation Sans Regular 2.1.5 (https://github.com/liberationfonts/liberation-fonts), the in-game settings menu's
-font (runtime/app/overlay_font.h)
-
-Digitized data copyright (c) 2010 Google Corporation with Reserved Font Arimo, Tinos and Cousine.
-Copyright (c) 2012 Red Hat, Inc. with Reserved Font Name Liberation.
-
-This Font Software is licensed under the SIL Open Font License, Version 1.1. The license text is at
-https://openfontlicense.org and in the release's licenses folder (LiberationSans-OFL.txt).
-
-
-AMD FidelityFX / FSR SDK 2.4 API headers (https://github.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK), the FSR
-upscaler's interface (third_party/ffx)
-
-Copyright (C) 2026 Advanced Micro Devices, Inc. MIT licence, as written at the top of each header. The FSR DLLs
-themselves (amd_fidelityfx_loader_dx12.dll, amd_fidelityfx_upscaler_dx12.dll, amd_fidelityfx_framegeneration_dx12.dll) are not in this repository; the
-release ships them under AMD's own licence (licenses\AMD-FSR-LICENSE.md).
-
-
-NVIDIA Streamline 2.14.16 headers (https://github.com/NVIDIA-RTX/Streamline), the DLSS interface
-(third_party/streamline)
-
-Copyright (c) 2022-2025 NVIDIA CORPORATION. MIT licence, as written at the top of each header and in
-third_party/streamline/LICENSE.txt. sl_security.h: its <softpub.h> include is written in lower case for MinGW.
-The Streamline and DLSS DLLs (sl.interposer.dll, sl.common.dll, sl.dlss.dll, nvngx_dlss.dll) are not in this
-repository; the release ships them under NVIDIA's own terms (licenses\NVIDIA-DLSS-LICENSE.txt,
-licenses\NVIDIA-Streamline-LICENSE.txt).
-xemu DSP56300 interpreter and DSP DMA unit (https://github.com/xemu-project/xemu, hw/xbox/mcpx/apu/dsp, commit
-25e1ee2fd59a451f2ab57e825b4f8a5414220c8b)
-
-Copyright (c) 2015 espes, (c) 2020-2025 Matt Borgerson; the interpreter adapted from Hatari's DSP M56001
-emulation, (c) 2008 Thomas Huth and others, as each file states.
-
-The interpreter (interp/) is licensed under the GNU General Public License, version 2 or (at your option) any later
-version; the DMA unit (dsp_dma.c, dsp_dma.h, dsp_dma_regs.h) under the GNU Lesser General Public License, version 2.1
-or (at your option) any later version. The executable that contains them is distributed under the GNU General Public
-License, version 3. The licence texts and the source are at https://github.com/xemu-project/xemu and in the source of
-this program.
-
-compiler/clang.exe and compiler/lld-link.exe (a release): LLVM's Clang and LLD, Apache License 2.0 with LLVM exceptions
-(compiler/LLVM-LICENSE.txt), which build the game's code on the player's PC.
-
-third_party/fonts/archivoblack: Archivo Black, SIL Open Font License 1.1 (OFL.txt beside it), the port's menu
+These interfaces are present in the SDK. This Tiger Woods release does not
+bundle AMD FidelityFX, NVIDIA Streamline, or DLSS DLLs. Header notices do not
+grant redistribution rights for separately obtained vendor binaries.

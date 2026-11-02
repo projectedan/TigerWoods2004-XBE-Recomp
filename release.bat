@@ -16,4 +16,4 @@ rem an empty assets folder beside the exe, where the game (files or .iso) goes
 rd /s /q "%OUT%\release" 2>nul
 mkdir "%OUT%\release\assets"
 rem the compiler folder without its work folder: no game code goes in the zip, the first start builds it
-"%SEVENZIP%" a "%GAME_EXE%.zip" ".\%OUT%\%GAME_EXE%.exe" ".\%OUT%\release\assets" ".\%OUT%\compiler" .\README.md .\LICENSE "%SDK%\THIRD_PARTY.txt" "-xr!compiler\work" || exit /b 1
+"%SEVENZIP%" a "%GAME_EXE%.zip" ".\%OUT%\%GAME_EXE%.exe" ".\%OUT%\release\assets" ".\%OUT%\compiler" .\README.md .\LICENSE .\docs "%SDK%\THIRD_PARTY.txt" "%SDK%\licenses" "-xr!compiler\work" || exit /b 1
