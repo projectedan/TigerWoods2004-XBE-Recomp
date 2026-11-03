@@ -29,11 +29,17 @@ Press **F1**, or **Back + Start** on a controller, to open it over the game. Cha
 - **Controls** - Controller and keyboard and mouse diagrams, matching what you last used.
 
 ### Display
+
+![Two-player split-screen gameplay](docs/images/display.png)
+
 - **Widescreen** - The 3D picture fills the screen, with the HUD and menus laid out for the wider frame, including the intro Play Now lesson panels and controller diagram.
 - **Splitscreen** - Split views fill the screen.
 - **Frame pacing** - Frames follow a steady timer, off the game's own processor core.
 
 ### Graphics
+
+![Tiger Woods teeing off at sunset](docs/images/graphics.png)
+
 - **Effects** - Bloom and depth of field, each of which can be turned off. Bloom is off in splitscreen.
 - **Full detail trees** - Trees keep their full model at any distance, without level of detail changes.
 - **Putting grid** - Grid lines keep their original thickness at higher rendering resolutions.
