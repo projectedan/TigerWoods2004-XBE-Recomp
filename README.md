@@ -51,6 +51,9 @@ Press **F1**, or **Back + Start** on a controller, to open it over the game. Cha
 - Crowd and ambient sounds use the game's own fades, so reactions blend into each other.
 
 ### Controls
+
+![Quick Menu keyboard and mouse controls](docs/images/controls.png)
+
 Supports Xbox, PlayStation and Switch controllers, with hot plugging and rumble, or keyboard and mouse.
 
 | Action | Keyboard and mouse |
