@@ -1,5 +1,11 @@
 # Tiger Woods PGA Tour 2004 - XBE Recomp
 
+<p align="center">
+  <img src="docs/images/fan-art.png" alt="Fan art for the Tiger Woods PGA Tour 2004 PC port" width="320">
+</p>
+
+<p align="center">Fan art by <a href="https://www.deviantart.com/pooterman">POOTERMAN</a>.</p>
+
 An unofficial native PC port of the original Xbox version of Tiger Woods PGA Tour 2004, with extended graphics options, widescreen, PC controls and other enhancements.
 
 This port was created using the [Xbox XBE Recomp](https://github.com/TGP482/XboxXBE-Recomp) tool.

@@ -37,3 +37,8 @@ endif()
 
 # target name = GAME_EXE in build.bat, xbe = GAME_XBE
 add_xbe_image(TW2004 default.xbe game.toml ${GAME_PARTITIONS} game)
+
+# Embed the icon Windows uses for the executable and its shortcuts.
+target_sources(TW2004 PRIVATE src/game/tw2004_icon.rc)
+set_property(SOURCE src/game/tw2004_icon.rc APPEND PROPERTY
+    OBJECT_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/src/game/tw2004.ico")
