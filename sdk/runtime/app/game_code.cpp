@@ -112,7 +112,9 @@ std::vector<Image> Images() {
 
 fs::path WorkDir(const Image& image) { return CompilerDir() / "work" / image.exe; }
 fs::path CodeDll(const Image& image) { return ExeDir() / (image.exe + L".dll"); }
-fs::path StampFile(const Image& image) { return WorkDir(image) / "built.txt"; }
+// beside the DLL, so deleting the compiler folder keeps it; releases before 0.7.2 kept it in the work folder
+fs::path StampFile(const Image& image) { return ExeDir() / (image.exe + L".built.txt"); }
+fs::path OldStampFile(const Image& image) { return WorkDir(image) / "built.txt"; }
 std::wstring Quote(const fs::path& path) { return L"\"" + path.wstring() + L"\""; }
 fs::path CompileLog() { return ExeDir() / "logs" / "compile.log"; }
 
@@ -147,6 +149,7 @@ bool Current(const Target& target) {
     fs::file_time_type built = fs::last_write_time(CodeDll(*target.image), ec);
     if (ec) return false;
     std::ifstream f(StampFile(*target.image));
+    if (!f) f.open(OldStampFile(*target.image));
     if (!f) return built > fs::last_write_time(ExeDir() / (target.image->exe + L".exe"), ec);
     std::string line;
     return std::getline(f, line) && line == target.stamp;

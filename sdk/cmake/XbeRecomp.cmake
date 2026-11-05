@@ -224,7 +224,8 @@ target_link_libraries(${target} PRIVATE tomlplusplus::tomlplusplus $<LINK_ONLY:S
         -Wl,/def:${GEN}/exports.def)
     # a stamp from an earlier build on the executable's first start would outrank this DLL
     add_custom_command(TARGET ${target}_code POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E rm -f ${XBE_COMPILER_DIR}/work/${target}/built.txt)
+        COMMAND ${CMAKE_COMMAND} -E rm -f ${XBE_COMPILER_DIR}/work/${target}/built.txt
+            $<TARGET_FILE_DIR:${target}_code>/${target}.built.txt)
     # profile-guided optimisation (clang): XBE_PGO=GEN builds a measuring program (it writes <target>-<pid>.profraw,
     # LLVM_PROFILE_FILE to choose); with pgo/<target>.profdata beside the port (llvm-profdata merge of those) and
     # XBE_PGO not OFF/GEN, the build uses it. The kit carries the profile, so a player's build uses it too.
